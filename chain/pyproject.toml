@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "headlights-chain"
+version = "0.1.0a1"
+description = "Tamper-evident hash chain for AI agent conduct records, implementing draft-sharif-agent-audit-trail-00."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Stellae Consulting Pty Ltd", email = "hello@useheadlights.com" }]
+keywords = ["audit", "agent", "ai", "tamper-evident", "aat", "ietf"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "cryptography>=42.0,<47",
+    "pydantic>=2.5,<3",
+    "rfc8785>=0.1.4,<0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+]
+
+[project.urls]
+Homepage = "https://useheadlights.com"
+Repository = "https://github.com/headlights-oss/headlights"
+Specification = "https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/"
+
+[tool.setuptools.packages.find]
+include = ["headlights_chain*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"

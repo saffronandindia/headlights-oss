@@ -53,3 +53,7 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# pytest cache directories sometimes get stuck on Windows mounts
+chain/.coverage*
+chain/pytest-cache-files-*
