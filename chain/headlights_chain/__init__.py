@@ -3,6 +3,15 @@
 Implements draft-sharif-agent-audit-trail-00 record format and chain mechanics.
 """
 
+from headlights_chain.anchor import (
+    Anchor,
+    AnchorReceipt,
+    InMemoryAnchor,
+    NoOpAnchor,
+    merkle_proof,
+    merkle_root,
+    verify_merkle_proof,
+)
 from headlights_chain.chain import Chain, ChainState, VerificationResult
 from headlights_chain.enums import (
     ActionType,
@@ -30,4 +39,11 @@ __all__ = [
     "SigningKey",
     "VerifyingKey",
     "generate_keypair",
+    "Anchor",
+    "AnchorReceipt",
+    "NoOpAnchor",
+    "InMemoryAnchor",
+    "merkle_root",
+    "merkle_proof",
+    "verify_merkle_proof",
 ]

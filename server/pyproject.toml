@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "headlights-server"
+version = "0.1.0a1"
+description = "Headlights hosted backend — FastAPI service exposing the four MVP endpoints for AI agent conduct records."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Stellae Consulting Pty Ltd", email = "hello@useheadlights.com" }]
+keywords = ["audit", "agent", "ai", "server", "aat", "ietf", "fastapi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+]
+
+dependencies = [
+    "headlights-chain>=0.1.0a1,<0.2",
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "pydantic>=2.5,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+headlights-server = "headlights_server.cli:main"
+
+[project.urls]
+Homepage = "https://useheadlights.com"
+Repository = "https://github.com/headlights-oss"
+Specification = "https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/"
+
+[tool.setuptools.packages.find]
+include = ["headlights_server*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"
