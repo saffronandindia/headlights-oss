@@ -51,6 +51,28 @@ class CloseSessionResponse(BaseModel):
     closed_at: str
 
 
+# ── Publishing (Trace viewer access) ────────────────────────────────────
+
+
+class PublishSessionRequest(BaseModel):
+    """Toggle the public-trace view for a session.
+
+    Sessions are private by default. Publishing makes the public trace URL
+    (GET /v1/sessions/{sid}/trace) accessible without authentication. This
+    is the mechanism that powers the email-as-demo loop — agent owners
+    explicitly opt in to public auditability for sessions they want to
+    showcase.
+    """
+
+    public: bool = Field(default=True, description="Set False to un-publish.")
+
+
+class PublishSessionResponse(BaseModel):
+    session_id: str
+    public: bool
+    trace_url: str = Field(description="Path to the public trace view (relative to server root).")
+
+
 # ── Actions ─────────────────────────────────────────────────────────────
 
 

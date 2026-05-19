@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Conduct Scorecard — Headlights</title>
+  <meta name="description" content="Public scorecard rating major AI products on tamper-evidence, replayability, retention, and standards alignment for their audit trails.">
+  <meta property="og:title" content="AI Conduct Scorecard">
+  <meta property="og:description" content="If a regulator asked what your AI agent did, could you prove it? We scored seven major AI products against the IETF AAT standard. Most failed.">
+  <meta property="og:type" content="website">
+  <style>
+    :root {
+      --bg: #0e1116;
+      --bg-card: #161b22;
+      --bg-row-alt: #1a1f27;
+      --fg: #e6edf3;
+      --fg-dim: #9aa6b4;
+      --fg-faint: #6e7a8a;
+      --accent: #58a6ff;
+      --good: #3fb950;
+      --warn: #d29922;
+      --bad: #f85149;
+      --border: #30363d;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.55; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 56px 24px 96px; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 32px; margin-bottom: 40px; }
+    .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; color: var(--fg-faint); text-transform: uppercase; margin-bottom: 12px; }
+    h1 { font-size: 44px; line-height: 1.1; margin: 0 0 16px; font-weight: 700; letter-spacing: -0.02em; }
+    .lede { font-size: 19px; color: var(--fg-dim); max-width: 760px; margin: 0; }
+    .meta { font-family: var(--mono); font-size: 13px; color: var(--fg-faint); margin-top: 24px; }
+    h2 { font-size: 26px; margin: 56px 0 16px; letter-spacing: -0.01em; }
+    h3 { font-size: 19px; margin: 36px 0 10px; }
+    p { color: var(--fg); margin: 0 0 14px; }
+    p.dim { color: var(--fg-dim); }
+
+    /* Score table */
+    table.scores { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 14px; margin: 24px 0 8px; }
+    table.scores th, table.scores td { padding: 12px 10px; text-align: center; border-bottom: 1px solid var(--border); }
+    table.scores th { color: var(--fg-faint); font-weight: 500; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+    table.scores th.product, table.scores td.product { text-align: left; white-space: nowrap; }
+    table.scores td.product { font-family: var(--sans); font-size: 15px; font-weight: 500; }
+    table.scores td.product .badge { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 6px; margin-left: 8px; border-radius: 3px; background: var(--bg-card); color: var(--fg-faint); border: 1px solid var(--border); vertical-align: middle; }
+    table.scores td.product .badge.ours { background: rgba(63, 185, 80, 0.15); color: var(--good); border-color: rgba(63, 185, 80, 0.4); }
+    table.scores tr.headlights { background: rgba(63, 185, 80, 0.04); }
+    table.scores td.total { font-weight: 700; font-size: 15px; }
+    table.scores td.cell-0 { color: var(--bad); }
+    table.scores td.cell-1 { color: var(--warn); }
+    table.scores td.cell-2 { color: #d8e1ec; }
+    table.scores td.cell-3 { color: var(--good); }
+    table.scores td.cell-u { color: var(--fg-faint); font-style: italic; }
+    table.scores th.dim { cursor: help; }
+
+    .legend { font-family: var(--mono); font-size: 12px; color: var(--fg-faint); margin: 12px 0 0; }
+    .legend span { margin-right: 18px; }
+    .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .dot.d0 { background: var(--bad); }
+    .dot.d1 { background: var(--warn); }
+    .dot.d2 { background: #d8e1ec; }
+    .dot.d3 { background: var(--good); }
+
+    /* Vendor cards */
+    .vendor { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 24px 28px; margin: 16px 0; }
+    .vendor.headlights { border-color: rgba(63, 185, 80, 0.35); }
+    .vendor h3 { margin-top: 4px; display: flex; align-items: baseline; justify-content: space-between; }
+    .vendor h3 .score { font-family: var(--mono); font-size: 16px; color: var(--fg-dim); }
+    .vendor h3 .score.unverified { color: var(--fg-faint); font-style: italic; }
+    .vendor .summary { color: var(--fg-dim); font-size: 15px; margin-bottom: 14px; }
+    .breakdown { font-family: var(--mono); font-size: 13px; color: var(--fg-dim); display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 14px 0 16px; }
+    .breakdown div { background: var(--bg); padding: 8px 10px; border-radius: 4px; border: 1px solid var(--border); text-align: center; }
+    .breakdown div b { color: var(--fg); display: block; font-size: 15px; }
+    .breakdown div.s0 b { color: var(--bad); }
+    .breakdown div.s1 b { color: var(--warn); }
+    .breakdown div.s2 b { color: var(--fg); }
+    .breakdown div.s3 b { color: var(--good); }
+    .breakdown div.su b { color: var(--fg-faint); font-style: italic; }
+    .vendor ul { padding-left: 18px; margin: 8px 0; color: var(--fg-dim); font-size: 14px; }
+    .vendor ul li { margin: 4px 0; }
+    .vendor ul li b { color: var(--fg); }
+
+    /* Methodology box */
+    .method-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin: 24px 0; font-size: 15px; color: var(--fg-dim); }
+    .method-box code { font-family: var(--mono); font-size: 13px; background: var(--bg); padding: 1px 6px; border-radius: 3px; color: var(--fg); }
+
+    /* Footer */
+    footer { border-top: 1px solid var(--border); margin-top: 56px; padding-top: 24px; color: var(--fg-faint); font-size: 13px; font-family: var(--mono); }
+    footer a { color: var(--fg-dim); }
+    footer .row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+
+    @media (max-width: 720px) {
+      h1 { font-size: 32px; }
+      .wrap { padding: 32px 16px 56px; }
+      .breakdown { grid-template-columns: repeat(4, 1fr); }
+      table.scores th, table.scores td { padding: 8px 6px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Headlights · AI Conduct Scorecard · v1.0</div>
+  <h1>If a regulator asked what your AI agent actually did, could you prove it?</h1>
+  <p class="lede">We scored seven major AI products on seven dimensions of audit-record quality — tamper evidence, signatures, retention, replayability, external anchoring, independent verifiability, and standards alignment. The IETF Agent Audit Trail draft is the yardstick. Most products fail it.</p>
+  <p class="meta">Snapshot: 19 May 2026 · Re-scored quarterly · Sources cited per dimension · Disputes welcome via <a href="https://github.com/saffronandindia/headlights-oss/issues">issues</a></p>
+</header>
+
+<section>
+  <h2>The leaderboard</h2>
+
+  <table class="scores">
+    <thead>
+      <tr>
+        <th class="product">Product</th>
+        <th class="dim" title="Tamper evidence — cryptographic chaining">A</th>
+        <th class="dim" title="Per-record signatures">B</th>
+        <th class="dim" title="Retention — how long records are kept">C</th>
+        <th class="dim" title="Replayability — content vs. metadata">D</th>
+        <th class="dim" title="External anchoring — beyond vendor control">E</th>
+        <th class="dim" title="Independent verifiability — standalone verifier">F</th>
+        <th class="dim" title="Standards alignment — IETF AAT, ISO 42001">G</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="headlights">
+        <td class="product">Headlights<span class="badge ours">ours</span></td>
+        <td class="cell-3">3</td>
+        <td class="cell-3">3</td>
+        <td class="cell-3">3</td>
+        <td class="cell-3">3</td>
+        <td class="cell-1">1</td>
+        <td class="cell-3">3</td>
+        <td class="cell-3">3</td>
+        <td class="total">19 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">Anthropic Claude</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-3">3</td>
+        <td class="cell-2">2</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-2">2</td>
+        <td class="total">10 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">Microsoft 365 Copilot</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-3">3</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-2">2</td>
+        <td class="total">9 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">OpenAI ChatGPT Enterprise / API</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-1">1</td>
+        <td class="cell-2">2</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-2">2</td>
+        <td class="total">8 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">Salesforce Einstein / Agentforce</td>
+        <td class="cell-0">0</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-3">3</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-1">1</td>
+        <td class="total">8 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">Google Gemini (Workspace)</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-1">1</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-1">1</td>
+        <td class="total">6 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">GitHub Copilot</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-1">1</td>
+        <td class="cell-0">0</td>
+        <td class="cell-0">0</td>
+        <td class="cell-2">2</td>
+        <td class="cell-1">1</td>
+        <td class="total">5 / 21</td>
+      </tr>
+      <tr>
+        <td class="product">Aigentsphere</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="cell-u">U</td>
+        <td class="total" style="color: var(--fg-faint); font-style: italic;">Unverified</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="legend">
+    <span><span class="dot d0"></span>0 — None</span>
+    <span><span class="dot d1"></span>1 — Weak</span>
+    <span><span class="dot d2"></span>2 — Solid</span>
+    <span><span class="dot d3"></span>3 — Strong</span>
+    <span><b>U</b> — Unverified</span>
+  </p>
+</section>
+
+<section>
+  <h2>How to read this</h2>
+  <p>Each product is scored 0–3 on seven dimensions, totalling out of 21. Scores come from public documentation only. We do not infer, speculate, or grade on private demos. Where a vendor's marketing makes a claim that public technical documentation does not substantiate, the dimension is marked <b>U</b> rather than zeroed — the vendor is invited to publish docs, after which we re-score.</p>
+  <p>Full rubric: <a href="https://github.com/saffronandindia/headlights-oss/blob/main/specs/scorecard-rubric.md">specs/scorecard-rubric.md</a>. Per-vendor sources: <a href="https://github.com/saffronandindia/headlights-oss/blob/main/specs/scorecard-research.md">specs/scorecard-research.md</a>.</p>
+
+  <div class="method-box">
+    <b>The seven dimensions:</b><br>
+    <b>A.</b> Tamper evidence — Is the log cryptographically chained, or is it merely "trust us, we won't modify it"?<br>
+    <b>B.</b> Per-record signatures — Can a specific log entry be proven to have been issued by the vendor or agent?<br>
+    <b>C.</b> Retention — How long are records kept? Configurable how far?<br>
+    <b>D.</b> Replayability — Does the log capture what was asked and what was produced, or just metadata?<br>
+    <b>E.</b> External anchoring — Are log hashes committed to a medium outside the vendor's control?<br>
+    <b>F.</b> Independent verifiability — Can a customer (or their auditor) confirm integrity without trusting the vendor?<br>
+    <b>G.</b> Standards alignment — Does the product align with any open AI-specific audit standard (IETF AAT, ISO 42001)?
+  </div>
+</section>
+
+<section>
+  <h2>Vendor breakdowns</h2>
+
+  <article class="vendor headlights">
+    <h3>Headlights <span class="score">19 / 21</span></h3>
+    <p class="summary">We score ourselves transparently because anything else would invalidate the exercise. We do not score ourselves 21 — external anchoring is not yet deployed.</p>
+    <div class="breakdown">
+      <div class="s3"><b>3</b>A</div>
+      <div class="s3"><b>3</b>B</div>
+      <div class="s3"><b>3</b>C</div>
+      <div class="s3"><b>3</b>D</div>
+      <div class="s1"><b>1</b>E</div>
+      <div class="s3"><b>3</b>F</div>
+      <div class="s3"><b>3</b>G</div>
+    </div>
+    <ul>
+      <li><b>Tamper evidence (3).</b> Every record SHA-256 hash-chained per RFC 8785 canonical JSON. Tampering with any field of any record breaks verification at that exact position. Demonstrable end-to-end via the verifier CLI.</li>
+      <li><b>Per-record signatures (3).</b> ECDSA P-256 signatures on every record using a registered public key, encoded per IEEE P1363 as the AAT spec requires.</li>
+      <li><b>Retention (3).</b> Default 7 years (Australian APRA / OAIC), customer-configurable 6 months to 10 years per tenant. Free tier: 30 days.</li>
+      <li><b>Replayability (3).</b> Full session record: action type, action detail, outcome, trust level, input hash, output hash, latency, jurisdiction, risk score. Sufficient to reconstruct what the agent did and what it produced.</li>
+      <li><b>External anchoring (1).</b> The Anchor interface, Merkle-tree builder, and inclusion-proof generator ship in the open-source repo. The production Azure Immutable Blob adapter is not yet deployed. Until daily Merkle roots are written to an external WORM medium, this dimension caps at 1. Target: Q3 2026.</li>
+      <li><b>Independent verifiability (3).</b> <code>pip install headlights-verify</code>. Standalone Python CLI. Validates a chain export end-to-end with no contact to the Headlights server.</li>
+      <li><b>Standards alignment (3).</b> Reference implementation of <a href="https://datatracker.ietf.org/doc/html/draft-sharif-agent-audit-trail-00">IETF AAT draft</a>, version 00. Apache 2.0 licensed.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>Anthropic Claude <span class="score">10 / 21</span></h3>
+    <p class="summary">Six-year retention is best-in-class. Content reachable via the Compliance API. But the trust model is "Anthropic-as-custodian" — no cryptographic mechanism documented, and Claude Code is excluded from coverage entirely.</p>
+    <div class="breakdown">
+      <div class="s1"><b>1</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s3"><b>3</b>C</div>
+      <div class="s2"><b>2</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s2"><b>2</b>G</div>
+    </div>
+    <ul>
+      <li><b>A.</b> Activity Feed described as a record/feed; no hash chaining or signatures documented.</li>
+      <li><b>C.</b> Activity Feed retained 6 years — outlier strong against 30–180 day peers.</li>
+      <li><b>D.</b> Compliance API reaches underlying chats, files, projects. Gap: Claude Code (developer CLI) explicitly excluded.</li>
+      <li><b>F.</b> Compliance API exists but is not self-serve to enable — requires Anthropic account-team contact.</li>
+      <li><b>G.</b> Accredited ISO/IEC 42001:2023 certified.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>Microsoft 365 Copilot <span class="score">9 / 21</span></h3>
+    <p class="summary">Excellent retention machinery (up to 10 years on Premium) and tamper-resistant storage options via Azure Immutable Blob. But Microsoft explicitly excludes prompt and response text from the unified audit log by design — admins must use a separate eDiscovery surface to see what users actually asked.</p>
+    <div class="breakdown">
+      <div class="s1"><b>1</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s3"><b>3</b>C</div>
+      <div class="s1"><b>1</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s2"><b>2</b>G</div>
+    </div>
+    <ul>
+      <li><b>A.</b> No hash chaining on log entries; Azure Immutable Blob is customer-configurable WORM at the storage tier.</li>
+      <li><b>C.</b> Premium tier: 1-year default, configurable to 10 years.</li>
+      <li><b>D.</b> Metadata only by design — "doesn't record the actual user prompts or responses." Content recovery requires eDiscovery.</li>
+      <li><b>G.</b> Microsoft Security Copilot and Azure AI Foundry are ISO/IEC 42001:2023 certified; M365 Copilot inherits broader Microsoft compliance posture.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>OpenAI ChatGPT Enterprise / API <span class="score">8 / 21</span></h3>
+    <p class="summary">Compliance API exposes conversations on ChatGPT Enterprise — solid replay. But default retention is 30 days; the customer is told to "implement a system to continuously download" for longer storage. No cryptographic tamper evidence.</p>
+    <div class="breakdown">
+      <div class="s1"><b>1</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s1"><b>1</b>C</div>
+      <div class="s2"><b>2</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s2"><b>2</b>G</div>
+    </div>
+    <ul>
+      <li><b>A.</b> "Immutable, append-only" claimed at platform level; no cryptographic mechanism documented.</li>
+      <li><b>C.</b> Compliance Logs Platform: 30 days. Aggressive for a flagship enterprise product.</li>
+      <li><b>D.</b> Conversations, files, GPT configs reachable via Compliance API. API-platform inference replay must be customer-captured.</li>
+      <li><b>G.</b> SOC 2 Type II, ISO/IEC 27001, ISO/IEC 42001:2023.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>Salesforce Einstein / Agentforce <span class="score">8 / 21</span></h3>
+    <p class="summary">The strongest replay surface of any incumbent — prompt, masked prompt, unfiltered response, toxicity, feedback, user modifications — all into Data Cloud. But Salesforce's own docs warn that audit data "can be deleted" by admins, which costs them the entire tamper-evidence dimension.</p>
+    <div class="breakdown">
+      <div class="s0"><b>0</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s2"><b>2</b>C</div>
+      <div class="s3"><b>3</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s1"><b>1</b>G</div>
+    </div>
+    <ul>
+      <li><b>A.</b> Admins can delete records: "Data stored in Data Cloud can be deleted." No cryptographic tamper-evidence.</li>
+      <li><b>D.</b> Industry-leading capture: original prompt + masked prompt + unfiltered response + toxicity + feedback + user modifications.</li>
+      <li><b>D-caveat.</b> Gated behind Data Cloud licensing and an explicit opt-in setting. Default posture is empty.</li>
+      <li><b>G.</b> SOC 2, ISO/IEC 27001/27017/27018. Public ISO 42001 status for Einstein not confirmed in this pass.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>Google Gemini (Workspace) <span class="score">6 / 21</span></h3>
+    <p class="summary">Mature audit machinery inherited from Google Workspace. Like Microsoft, Google captures interaction metadata but strips prompt and response content from the audit log itself — content lives in Google Vault as a separate surface.</p>
+    <div class="breakdown">
+      <div class="s1"><b>1</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s1"><b>1</b>C</div>
+      <div class="s1"><b>1</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s1"><b>1</b>G</div>
+    </div>
+    <ul>
+      <li><b>C.</b> Gemini in Workspace logs: 180 days. Cloud Audit Activity logs: 400 days (Cloud Logging default), Data Access logs: 30 days.</li>
+      <li><b>D.</b> "Logs contain no actual prompt content — only metadata about interactions." Content via Vault.</li>
+      <li><b>G.</b> Workspace-wide SOC 2 / ISO 27001 posture inherited. Gemini-specific ISO 42001 not confirmed publicly in this pass.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>GitHub Copilot <span class="score">5 / 21</span></h3>
+    <p class="summary">Audit log is excellent for governance actions — policy changes, content-exclusion rules, plan changes. But by stated design, prompts and suggestions are not logged at all. There is no replay surface for what a Copilot user actually asked or what the model produced.</p>
+    <div class="breakdown">
+      <div class="s1"><b>1</b>A</div>
+      <div class="s0"><b>0</b>B</div>
+      <div class="s1"><b>1</b>C</div>
+      <div class="s0"><b>0</b>D</div>
+      <div class="s0"><b>0</b>E</div>
+      <div class="s2"><b>2</b>F</div>
+      <div class="s1"><b>1</b>G</div>
+    </div>
+    <ul>
+      <li><b>C.</b> 180-day retention; SIEM streaming recommended for longer.</li>
+      <li><b>D.</b> "No request or response is stored at the proxy or LLM end." Zero replay capability for AI interactions.</li>
+      <li><b>G.</b> Inherits GitHub Enterprise SOC 2 / ISO 27001. No AI-specific certification publicly stated for Copilot.</li>
+    </ul>
+  </article>
+
+  <article class="vendor">
+    <h3>Aigentsphere <span class="score unverified">Unverified</span></h3>
+    <p class="summary">Australian AI-governance startup, seed-stage. Public marketing claims "audit trails," "full observability," and template alignment to multiple compliance regimes — but no public technical documentation, no security whitepaper, no API reference, and no vendor certification surfaced. Scored as <b>U</b> (claims unverifiable from public materials) rather than zeroed.</p>
+    <div class="breakdown">
+      <div class="su"><b>U</b>A</div>
+      <div class="su"><b>U</b>B</div>
+      <div class="su"><b>U</b>C</div>
+      <div class="su"><b>U</b>D</div>
+      <div class="su"><b>U</b>E</div>
+      <div class="su"><b>U</b>F</div>
+      <div class="su"><b>U</b>G</div>
+    </div>
+    <ul>
+      <li>Vendor is invited to publish technical documentation, after which we will re-score in the next quarterly update.</li>
+      <li>Marketing claims template alignment to GDPR, EU AI Act, ISO 42001, NIST AI RMF, ISO 27001, SOX — these are policy-template assertions, not vendor certifications.</li>
+    </ul>
+  </article>
+</section>
+
+<section>
+  <h2>What we learned</h2>
+  <p><b>No major AI vendor publicly claims cryptographic tamper-evidence on their audit logs.</b> All seven describe their logs as "immutable" or "append-only," but none publicly document hash chaining, Merkle structures, or per-entry signatures on the contents of the audit log. Every claim of immutability reduces to "trust the vendor."</p>
+  <p><b>External anchoring (blockchain, third-party notary, independent WORM) is universally absent.</b> Not one of the seven vendors publicly anchors log hashes outside their own infrastructure. The technical lift (RFC 3161 trusted timestamping) is modest — this is a posture choice, not a capability gap.</p>
+  <p><b>Replayability splits the field cleanly.</b> Anthropic, OpenAI Enterprise, and Salesforce capture actual prompt and response content. Microsoft 365 Copilot, Google Gemini, and GitHub Copilot deliberately strip content from the audit log. The Microsoft and Google design choice directly conflicts with the regulatory direction in EU AI Act Article 12, which requires the ability to reconstruct an agent's decisions.</p>
+  <p><b>ISO 42001 is becoming the de facto AI-governance certification.</b> Anthropic and OpenAI both hold it; Microsoft has it for Security Copilot and Azure AI Foundry. No vendor surfaced as referencing the IETF AAT draft — expected, since the draft is two months old, but worth tracking.</p>
+</section>
+
+<footer>
+  <div class="row">
+    <div>Snapshot: 19 May 2026 · Re-scored quarterly · Rubric v1.0</div>
+    <div><a href="https://github.com/saffronandindia/headlights-oss">github.com/saffronandindia/headlights-oss</a></div>
+  </div>
+  <div class="row" style="margin-top: 10px;">
+    <div>Built by <a href="https://useheadlights.com">Headlights</a> — open-source registry for AI conduct records.</div>
+    <div>Disputes: <a href="https://github.com/saffronandindia/headlights-oss/issues/new">open an issue</a></div>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

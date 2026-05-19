@@ -16,6 +16,7 @@ from headlights_server import __version__
 from headlights_server.config import Settings
 from headlights_server.routes.agents import router as agents_router
 from headlights_server.routes.conduct import router as conduct_router
+from headlights_server.routes.trace import router as trace_router
 from headlights_server.storage import SQLiteStore, Store
 
 
@@ -53,6 +54,7 @@ def create_app(
 
     app.include_router(agents_router)
     app.include_router(conduct_router)
+    app.include_router(trace_router)
 
     @app.get("/healthz", tags=["meta"], summary="Liveness probe.")
     def healthz() -> dict[str, str]:
