@@ -1,29 +1,5 @@
 """HostedClient — same @record decorator API as Client, but every action POSTs
 to a Headlights server instead of being held in memory.
-
-Synchronous httpx client; suitable for normal application code. An async
-version is a v2 concern.
-
-Example:
-
-    from headlights_sdk import HostedClient
-
-    client = HostedClient.register(
-        api_url="https://api.useheadlights.com",
-        agent_name="loan-analyser",
-        owner_email="ops@example.com",
-        purpose="approve consumer loans up to $1.5M",
-        agent_version="3.1.0",
-    )
-    # The returned client has .agent_id and .api_key set. Persist them
-    # somewhere — register() is one-shot and the API key is shown once.
-
-    @client.record
-    def lookup_credit_score(applicant_id: str) -> int:
-        ...
-
-    score = lookup_credit_score("APP-001")
-    client.close()
 """
 
 from __future__ import annotations
@@ -45,8 +21,6 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 class HostedClientError(RuntimeError):
-    """Raised when the server returns a non-2xx response to an SDK call."""
-
     def __init__(self, status_code: int, message: str) -> None:
         super().__init__(f"HTTP {status_code}: {message}")
         self.status_code = status_code
@@ -61,8 +35,6 @@ class _RecordOptions:
 
 
 class HostedClient:
-    """Hosted variant of the SDK Client. Mirrors the local Client API."""
-
     def __init__(
         self,
         *,
@@ -90,8 +62,6 @@ class HostedClient:
             headers={"Authorization": f"Bearer {api_key}"},
         )
 
-    # ── Construction helpers ────────────────────────────────────────────
-
     @classmethod
     def register(
         cls,
@@ -104,11 +74,6 @@ class HostedClient:
         public_key_pem: str | None = None,
         timeout: float = 30.0,
     ) -> "HostedClient":
-        """Register a new agent on the server, return a ready HostedClient.
-
-        The plaintext API key is held only on the returned client (in
-        `.api_key`). Persist it before the process exits.
-        """
         with httpx.Client(base_url=api_url.rstrip("/"), timeout=timeout) as bootstrap:
             response = bootstrap.post(
                 "/v1/agents",
@@ -132,14 +97,10 @@ class HostedClient:
         )
 
     def close(self) -> None:
-        """Close the active session (idempotent) and the HTTP client we own."""
         if self._session_id and not self._session_closed:
             try:
                 self._close_session(self._session_id)
             except HostedClientError:
-                # If close fails the chain on the server is still valid up to
-                # the last successfully-appended record. Swallow so callers
-                # using `with client:` don't see surprises during teardown.
                 pass
         if self._owns_http_client:
             self._http.close()
@@ -157,8 +118,6 @@ class HostedClient:
     @property
     def session_id(self) -> str | None:
         return self._session_id
-
-    # ── Sessions ────────────────────────────────────────────────────────
 
     @contextmanager
     def session(
@@ -203,7 +162,24 @@ class HostedClient:
         self._session_closed = True
         return response.json()
 
-    # ── Recording ───────────────────────────────────────────────────────
+    def publish_session(
+        self,
+        session_id: str,
+        *,
+        public: bool = True,
+    ) -> dict[str, Any]:
+        """Toggle the public-trace view for a session.
+
+        After publishing, the URL `{api_url}/v1/sessions/{session_id}/trace`
+        renders the conduct chain as a public HTML page accessible without
+        authentication.
+        """
+        response = self._http.post(
+            f"/v1/agents/{self.agent_id}/sessions/{session_id}/publish",
+            json={"public": public},
+        )
+        self._raise_on_error(response)
+        return response.json()
 
     def record(
         self,
@@ -275,13 +251,11 @@ class HostedClient:
                 )
                 return result
 
-            return wrapper  # type: ignore[return-value]
+            return wrapper
 
         if func is not None:
             return decorate(func)
         return decorate
-
-    # ── Retrieval ──────────────────────────────────────────────────────
 
     def get_conduct(
         self,
@@ -290,7 +264,6 @@ class HostedClient:
         since: str | None = None,
         until: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch records for this agent. Suitable input for `headlights-verify`."""
         if session_id is not None:
             response = self._http.get(
                 f"/v1/agents/{self.agent_id}/sessions/{session_id}/conduct"
@@ -306,8 +279,6 @@ class HostedClient:
             )
         self._raise_on_error(response)
         return response.json()["records"]
-
-    # ── Internals ──────────────────────────────────────────────────────
 
     def _ensure_session(self) -> None:
         if not self.is_session_active:
