@@ -281,10 +281,3 @@ def test_upload_all_writes_manifest(
         assert "local_trace_session_id" in entry
         assert "server_session_id" in entry
         assert "trace_url" in entry
-t.exists()
-    data = json.loads(manifest.read_text())
-    assert len(data) == 2
-    for entry in data:
-        assert "local_trace_session_id" in entry
-        assert "server_session_id" in entry
-        assert "trace_url" in entry

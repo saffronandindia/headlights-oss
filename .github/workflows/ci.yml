@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -42,7 +42,31 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pytest-asyncio httpx
 
-      - name: Run full test suite
-        env:
-          PYTHONPATH: chain:sdk-python:verifier:server:.
+      # Each package owns its own [tool.pytest.ini_options] in pyproject.toml
+      # (testpaths = ["tests"]). Running pytest from the package directory
+      # avoids the multiple-tests/-packages-on-sys.path collision that occurs
+      # when pytest is run from the repo root.
+
+      - name: Test chain
+        working-directory: chain
         run: python -m pytest -q
+
+      - name: Test sdk-python
+        working-directory: sdk-python
+        run: python -m pytest -q
+
+      - name: Test verifier
+        working-directory: verifier
+        run: python -m pytest -q
+
+      - name: Test server
+        working-directory: server
+        run: python -m pytest -q
+
+      # Marketing is not a separately installable package; it imports from
+      # chain and sdk-python directly. Per marketing/README.md the canonical
+      # invocation is from the repo root with an explicit PYTHONPATH.
+      - name: Test marketing
+        env:
+          PYTHONPATH: chain:sdk-python:.
+        run: python -m pytest marketing/tests -q
