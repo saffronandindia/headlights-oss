@@ -60,3 +60,25 @@ chain/pytest-cache-files-*
 
 **/pytest-cache-files-*/
 **/.pytest_cache/
+
+# Session handover docs — working artifacts, not part of the public repo
+HANDOVER.md
+HANDOVER*.md
+Headlights_Build_Backlog_v*.docx
+
+# Local SQLite databases (the verifier and reference server use these)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Marketing pipeline output (per-prospect drafts, cached GitHub responses,
+# generated prospect CSVs). The code stays; the generated data does not.
+marketing/drafts/
+marketing/prospects.csv
+marketing/.cache/
+marketing/cache/
+
+# Build / packaging artefacts that sometimes survive cleanup
+**/headlights_*.egg-info/
+**/build/
