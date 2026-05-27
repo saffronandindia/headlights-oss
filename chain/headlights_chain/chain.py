@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterable, Iterator
 
 from headlights_chain.canonical import (
@@ -24,6 +25,18 @@ from headlights_chain.canonical import (
 from headlights_chain.enums import ActionType, LifecycleEvent, Outcome, TrustLevel
 from headlights_chain.records import Record
 from headlights_chain.signatures import SigningKey, VerifyingKey
+
+
+def _parse_rfc3339(ts: str) -> datetime:
+    """Parse an AAT-permitted RFC 3339 timestamp into a timezone-aware datetime.
+
+    Both 'Z' and '±HH:MM' offsets are accepted by the Record validator, so
+    timestamp comparisons must normalise to a single timezone before ordering.
+    Lexicographic comparison of the raw strings is wrong for mixed-timezone
+    chains.
+    """
+    # Python 3.10's fromisoformat does not accept 'Z'; normalise to '+00:00'.
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
 @dataclass(frozen=True)
@@ -353,7 +366,7 @@ def _verify_records(
                     f"computed {prev_complete_hash}",
                 )
 
-        if prev_timestamp is not None and record.timestamp < prev_timestamp:
+        if prev_timestamp is not None and _parse_rfc3339(record.timestamp) < _parse_rfc3339(prev_timestamp):
             return VerificationResult.fail(
                 position,
                 f"timestamp regression: {record.timestamp} < {prev_timestamp}",

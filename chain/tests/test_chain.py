@@ -356,19 +356,73 @@ def test_timestamp_regression_detected() -> None:
     )
 
     exported = chain.export_records()
-    # Rewrite position 1's timestamp to be before genesis.
     exported[1]["timestamp"] = "2026-05-18T07:00:00Z"
     tampered = Chain.from_records(exported)
 
     result = tampered.verify()
     assert not result.is_intact
-    # The forged record's prev_hash check will fail first because the
-    # canonical form has changed; either way we want a failure.
+    assert result.failed_position == 1
+
+
+
+def test_mixed_timezone_timestamps_compared_as_instants_not_strings() -> None:
+    """Regression test: lexicographic string comparison was wrong for chains
+    mixing 'Z' and offset timestamps.
+
+    Two timestamps:
+      genesis : 2026-05-18T12:00:00Z       (12:00 UTC)
+      append  : 2026-05-18T11:00:00-02:00  (13:00 UTC, one hour later)
+
+    Lexically 'T11:' is less than 'T12:', so the pre-fix verifier flagged
+    this as a regression. The post-fix verifier parses both to UTC and
+    accepts them as monotonic.
+    """
+    chain = Chain.genesis(
+        agent_id="urn:headlights:agent:test",
+        agent_version="1.0.0",
+        timestamp="2026-05-18T12:00:00Z",
+    )
+    chain.append(
+        action_type="tool_call",
+        action_detail={"tool_name": "t", "parameters_hash": "h"},
+        outcome="success",
+        trust_level="L1",
+        timestamp="2026-05-18T11:00:00-02:00",
+    )
+    result = chain.verify()
+    assert result.is_intact, result.reason
+
+
+def test_mixed_timezone_real_regression_still_detected() -> None:
+    """The mirror test: an offset timestamp that is lexically later but
+    absolutely earlier than the previous UTC-Z timestamp must still be
+    detected as a regression.
+
+    Two timestamps:
+      genesis : 2026-05-18T12:00:00Z       (12:00 UTC)
+      append  : 2026-05-18T13:00:00+02:00  (11:00 UTC, one hour earlier)
+    """
+    chain = Chain.genesis(
+        agent_id="urn:headlights:agent:test",
+        agent_version="1.0.0",
+        timestamp="2026-05-18T12:00:00Z",
+    )
+    chain.append(
+        action_type="tool_call",
+        action_detail={"tool_name": "t", "parameters_hash": "h"},
+        outcome="success",
+        trust_level="L1",
+        timestamp="2026-05-18T12:00:01Z",
+    )
+    exported = chain.export_records()
+    exported[1]["timestamp"] = "2026-05-18T13:00:00+02:00"
+    tampered = Chain.from_records(exported)
+    result = tampered.verify()
+    assert not result.is_intact
     assert result.failed_position == 1
 
 
 # ── State / __len__ / iteration ─────────────────────────────────────────
-
 
 def test_state_reports_position_and_closed() -> None:
     chain = Chain.genesis(
@@ -409,3 +463,4 @@ def test_iteration_yields_records_in_order() -> None:
     items = list(chain)
     assert len(items) == 2
     assert all(isinstance(r, Record) for r in items)
+
