@@ -1,8 +1,8 @@
 # marketing/ — discovery + drafter agents
 
-This package contains the two AI agents that complete the Headlights
-email-as-demo loop. Both are themselves recorded into Headlights chains
-when they run, so the agents are their own demo.
+Every AI tool company tells you their product is safe for production. The honest test is whether they would use it on their own production work. Headlights' outreach pipeline — the agents that find prospects and draft emails to them — runs through Headlights. Every prospect filter, every API call, every drafted email is itself a record in a Headlights chain. If we wouldn't put our own marketing on the chain, you shouldn't put yours.
+
+This package contains the two AI agents that complete the email-as-demo loop.
 
 ## What's in here
 

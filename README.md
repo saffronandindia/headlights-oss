@@ -2,9 +2,9 @@
 
 **A tamper-evident record of what your AI agent actually did.**
 
-Headlights is an open-source registry for AI agent conduct records. Install the SDK in the workflow your agent runs in, record every decision the agent takes, and produce a signed, append-only chain that a regulator, a court, or a customer's lawyer can verify months or years later.
+When an AI agent gets something wrong — and one of them will — the institution that deployed it almost never has the evidence to reconstruct what the agent saw, what it inferred, what it did, and who authorised it. Aircraft have flight recorders. Production AI agents do not. Headlights is the missing piece.
 
-The project exists because almost no AI agent in production today carries the equivalent of an aircraft's flight recorder. When an agent gets something wrong, and one of them will, the institution that deployed it usually cannot reconstruct, with evidence, what the agent saw, what it inferred, what it did, and who authorised it. Headlights provides the primitive that makes that reconstruction routine.
+Install the SDK in the workflow your agent runs in, record every decision the agent takes, and produce a signed, append-only chain that a regulator, a court, or a customer's lawyer can verify months or years later. Open-source, no vendor lock-in, no proprietary auditor in the loop.
 
 Built on the [IETF Agent Audit Trail draft](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/). Apache 2.0 licensed. Companion field notes on real AI agent failures live at [useheadlights.com](https://useheadlights.com).
 
@@ -26,7 +26,7 @@ Built on the [IETF Agent Audit Trail draft](https://datatracker.ietf.org/doc/dra
 
 ```bash
 # From a checkout of this repo:
-pip install -e ./chain ./sdk-python ./verifier
+pip install -e ./chain ./sdk-python ./verifier ./server
 
 # Generate a signed conduct chain via the SDK:
 python examples/loan_analyser_demo.py

@@ -1,6 +1,6 @@
 # headlights-sdk
 
-Drop a decorator on your agent functions. Every call lands in a tamper-evident, AAT-aligned conduct chain you can later prove was untouched.
+Six months from now, the regulator will ask what your agent did on a specific date. The institutions that can answer with evidence will outcompete the ones that can't. This SDK is the one-decorator way to be in the first group. Wrap any function your agent calls, and every invocation is recorded into a tamper-evident chain you can prove was untouched.
 
 Local-only at v1 — records live in memory and you export them to verify or persist. v2 will ship a hosted client that streams to `api.useheadlights.com`.
 

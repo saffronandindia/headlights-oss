@@ -11,6 +11,12 @@ Headlights produces evidence that real institutions may one day rely on in front
 
 Once we cut a `0.1.0` release, this table will track the supported branches.
 
+## Cryptographic algorithms in scope
+
+Headlights uses **ECDSA over the NIST P-256 curve** for record signatures, **SHA-256** for the hash chain and signature digests, and **IEEE P1363** fixed-length r||s encoding (not ASN.1 DER) for signature serialisation. The canonical record form is **JCS (RFC 8785)** JSON. The Merkle anchor uses **SHA-256** with **RFC 6962-style** odd-leaf duplication.
+
+Reports of weaknesses in our implementation or use of any of these primitives are in scope.
+
 ## Reporting a vulnerability
 
 Please email **security@useheadlights.com** with a description of the issue, steps to reproduce, the version or commit hash you tested against, and any proof-of-concept you have.

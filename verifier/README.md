@@ -1,10 +1,8 @@
 # headlights-verify
 
-Public verifier CLI for Headlights AI agent conduct chains.
+A tamper-evidence claim that only the vendor can verify is not a tamper-evidence claim. This CLI is the verification path turned into something anyone — an auditor, a regulator, the customer's lawyer, a journalist — can install on a laptop and run themselves. No phone-home. No vendor account. No proprietary tooling. Take a chain export, run `headlights-verify`, see for yourself.
 
-Takes a chain export (JSON array or NDJSON), re-runs the integrity checks defined by [`draft-sharif-agent-audit-trail-00`](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/), and prints `✓ chain intact` or `✗ chain BROKEN` along with the first failing position when tampering is detected.
-
-This package depends only on `headlights-chain`. It is intentionally tiny so anyone — auditors, regulators, customers, journalists — can install it on a fresh laptop and re-verify a conduct record themselves.
+Takes a chain export (JSON array or NDJSON), re-runs the integrity checks defined by [`draft-sharif-agent-audit-trail-00`](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/), and prints `✓ chain intact` or `✗ chain BROKEN` along with the first failing position when tampering is detected. Depends only on `headlights-chain`.
 
 ## Install
 

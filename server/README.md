@@ -1,6 +1,8 @@
 # headlights-server
 
-FastAPI backend for Headlights. Exposes the four MVP endpoints from the handover §4:
+If you're going to record what your AI agent does, you need somewhere to put the records. This is the reference backend — a FastAPI service over SQLite, with the endpoints needed to register an agent, open a session, append actions, and retrieve the chain for verification. Run it locally for development. Swap SQLite for Postgres for production. Or skip it entirely and write your own; the `Store` interface in `storage.py` is the only contract.
+
+## Endpoints
 
 - `POST /v1/agents` — register an agent, receive an API key (shown once).
 - `POST /v1/agents/{agent_id}/sessions` — open a session, get the genesis record back.

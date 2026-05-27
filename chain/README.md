@@ -1,6 +1,8 @@
 # headlights-chain
 
-Tamper-evident hash chain for AI agent conduct records. Pure Python, persistence-agnostic, AAT-aligned.
+When the question is "what did the AI agent actually do?", the answer needs to survive an adversary with admin access to the database the agent wrote to. This package is the cryptographic primitive that makes the answer survive: a SHA-256 hash chain over JCS-canonicalised records, with optional ECDSA P-256 signatures. It knows nothing about databases, tenants, HTTP, or agents. Everything else in this repo — the SDK, the verifier, the server — is built on top of it.
+
+Pure Python, persistence-agnostic, AAT-aligned.
 
 Implements the record format and chain mechanics of [`draft-sharif-agent-audit-trail-00`](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/):
 
