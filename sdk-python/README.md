@@ -64,6 +64,35 @@ with client.session(genesis_detail={"config_hash": "sha256:abc..."}):
 
 Set `auto_session=False` on the Client constructor to require explicit sessions.
 
+## Governance guards
+
+The `headlights_sdk.guards` sub-package adds named, thin pre/post conditions on
+top of the client. Each applies one governance check and records the decision as
+a valid AAT record on the chain — no new crypto, no new record format.
+
+```python
+from headlights_sdk import Client
+from headlights_sdk.guards import AuthorityGate, EgressGate
+
+client = Client(agent_id="urn:org:agent", agent_version="1.0.0")
+
+# Deny instructions from sources not authorised to bind the agent.
+AuthorityGate(client, authorised_sources={"urn:org:ops-console"}).enforce(
+    source="urn:org:ops-console", instruction="run payroll"
+)
+
+# Block sensitive data leaving the trust boundary.
+EgressGate(
+    client,
+    trusted_destinations={"https://internal.corp"},
+    sensitive_patterns={"aws_key": r"AKIA[0-9A-Z]{16}"},
+).enforce(content=reply, destination="https://partner.example")
+```
+
+`AuthorityGate` and `EgressGate` ship today; `ConstraintGate`, `PersonaGuard`,
+`CitationVerifier`, `VerificationGate`, and the record helpers follow. See
+[`headlights_sdk/guards/README.md`](headlights_sdk/guards/README.md).
+
 ## License
 
 Apache 2.0.
