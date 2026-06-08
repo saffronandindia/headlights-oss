@@ -49,7 +49,7 @@ On top of the raw record API, the SDK ships a thin layer of named **governance g
 
 **Gate layer** (enforced before the action, in order): `AuthorityGate`, `ConstraintGate`, `PersonaGuard`, `CitationVerifier`, `VerificationGate`, `EgressGate`.
 
-Shipping now are the two gates with no existing equivalent in the toolkit: **AuthorityGate** (is the instruction's source authorised to bind the agent?) and **EgressGate** (is sensitive data leaving the trust boundary?). The remaining modules follow the same thin pattern: no new crypto, no new record format, just named checks that delegate to the chain.
+All eight ship today, following the same thin pattern: no new crypto, no new record format, just named checks that delegate to the chain. The two with no prior equivalent in the toolkit are **AuthorityGate** (is the instruction's source authorised to bind the agent?) and **EgressGate** (is sensitive data leaving the trust boundary?).
 
 ```python
 from headlights_sdk import Client

@@ -21,17 +21,29 @@ Guards add no new crypto and no new record format; they delegate to
 
 ## What's here
 
-Two of the eight planned modules: the two Layer-2 gates that have no existing
-equivalent in the toolkit.
+All eight modules, in two layers.
 
-| Guard | Question it answers | Records |
-| :---- | :------------------ | :------ |
-| `AuthorityGate` | Who issued this instruction, and are they authorised to bind the agent? Runs first; source and authority only, not policy. | `decision` / `denied` on an unauthorised source |
-| `EgressGate` | Does this output carry sensitive data, and is the destination inside the trust boundary? Runs where data would leave; classification and destination only, not content moderation. | `decision` / `denied` when sensitive data is bound for an untrusted destination |
+**Record layer** (write evidence after the action):
 
-Still to come (same pattern): `ConstraintGate`, `PersonaGuard`,
-`CitationVerifier`, `VerificationGate`, and the `ConductRecord` / `MetricRecord`
-record helpers.
+| Module | What it records |
+| :----- | :-------------- |
+| `ConductRecord` | One full conduct record per action: model id, hashed system prompt, retrieved sources, tool calls, hashed output. |
+| `MetricRecord` | A signed aggregate metric bound to the chain root hash, so the number can be recomputed from the verified records and proven. |
+
+**Gate layer** (enforce before the action, in pipeline order):
+
+| Gate | Question it answers |
+| :--- | :------------------ |
+| `AuthorityGate` | Who issued this instruction, and are they authorised to bind the agent? Runs first; source and authority only, not policy. |
+| `ConstraintGate` | Does this action comply with the declared standing rules? |
+| `PersonaGuard` | Does this reply match the agent's defined identity and scope? |
+| `CitationVerifier` | Is every citation real, checked against a trusted source? |
+| `VerificationGate` | Is this claim true, routed to a trusted source rather than back to the model? |
+| `EgressGate` | Does this output carry sensitive data bound for outside the trust boundary? |
+
+Each gate denies with a `decision` / `denied` AAT record and raises from
+`enforce()`. Sensitive inputs (replies, claims, prompts, outputs, and matched
+sensitive content) are hashed, never stored raw.
 
 ## Usage
 
@@ -87,11 +99,12 @@ Tahoe"). `EgressGate` covers trust-boundary enforcement the drafts leave empty
 ```sh
 cd sdk-python
 pip install -e ".[dev]" -e ../chain
-pytest tests/test_guards.py -q
+pytest tests/test_guards.py tests/test_guards_modules.py -q
 ```
 
-Seven tests cover the deny and allow paths for both guards, the `enforce()` raise
-on denial, the guarantee that `EgressGate` never stores raw content, and
-signed-chain verification. The constraint each one asserts: a guard's failure path
-must still write a valid AAT record, a registered `action_type` and `outcome`, on a
-chain that verifies intact.
+Twenty-one tests across `test_guards.py` and `test_guards_modules.py` cover the
+deny and allow paths for every gate, the `enforce()` raise on denial, the two
+record helpers, the guarantee that raw content is never stored, and signed-chain
+verification. The constraint each one asserts: a guard's failure path must still
+write a valid AAT record, a registered `action_type` and `outcome`, on a chain
+that verifies intact.

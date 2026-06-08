@@ -5,32 +5,43 @@ governance decision as a valid AAT record (draft-sharif-agent-audit-trail-00).
 The guard names are the Headlights taxonomy; the record format is the spec's.
 No new crypto, no new record format.
 
-Layer 2 gates implemented so far::
+Eight modules in two layers.
 
-    from headlights_sdk import Client
-    from headlights_sdk.guards import AuthorityGate, EgressGate
+Record layer (write evidence after the action)::
 
-    client = Client(agent_id="urn:org:agent", agent_version="1.0.0")
+    from headlights_sdk.guards import ConductRecord, MetricRecord
 
-    authority = AuthorityGate(client, authorised_sources={"urn:org:ops-console"})
-    authority.enforce(source="urn:org:ops-console", instruction="run payroll")
+Gate layer (enforce before the action, in order)::
 
-    egress = EgressGate(
-        client,
-        trusted_destinations={"https://internal.corp"},
-        sensitive_patterns={"aws_key": r"AKIA[0-9A-Z]{16}"},
+    from headlights_sdk.guards import (
+        AuthorityGate, ConstraintGate, PersonaGuard,
+        CitationVerifier, VerificationGate, EgressGate,
     )
-    egress.enforce(content=reply, destination="https://partner.example")
 """
 
 from headlights_sdk.guards.authority import AuthorityGate
 from headlights_sdk.guards.base import Guard, GuardDenied, GuardResult
+from headlights_sdk.guards.citation import CitationVerifier
+from headlights_sdk.guards.conduct import ConductRecord
+from headlights_sdk.guards.constraint import ConstraintGate
 from headlights_sdk.guards.egress import EgressGate
+from headlights_sdk.guards.metric import MetricRecord
+from headlights_sdk.guards.persona import PersonaGuard
+from headlights_sdk.guards.verification import VerificationGate
 
 __all__ = [
+    # Base
     "Guard",
     "GuardResult",
     "GuardDenied",
+    # Record layer
+    "ConductRecord",
+    "MetricRecord",
+    # Gate layer (pipeline order)
     "AuthorityGate",
+    "ConstraintGate",
+    "PersonaGuard",
+    "CitationVerifier",
+    "VerificationGate",
     "EgressGate",
 ]
