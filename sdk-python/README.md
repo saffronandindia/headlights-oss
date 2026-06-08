@@ -68,7 +68,7 @@ Set `auto_session=False` on the Client constructor to require explicit sessions.
 
 The `headlights_sdk.guards` sub-package adds named, thin pre/post conditions on
 top of the client. Each applies one governance check and records the decision as
-a valid AAT record on the chain — no new crypto, no new record format.
+a valid AAT record on the chain, with no new crypto and no new record format.
 
 ```python
 from headlights_sdk import Client
