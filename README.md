@@ -1,5 +1,7 @@
 ﻿# Headlights
 
+[![CI](https://github.com/saffronandindia/headlights-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/saffronandindia/headlights-oss/actions/workflows/ci.yml)
+
 **A tamper-evident record of what your AI agent actually did.**
 
 When an AI agent gets something wrong (and one of them will), the institution that deployed it almost never has the evidence to reconstruct what the agent saw, what it inferred, what it did, and who authorised it. Aircraft have flight recorders. Production AI agents do not. Headlights is built to fill that gap.
