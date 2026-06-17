@@ -52,17 +52,17 @@ def require_api_key(
 
     key = _strip_bearer(authorization)
     row = store.lookup_api_key(key_prefix(key))
-    if row is None:
+
+    # Check revocation BEFORE the hash compare so that revoked and invalid keys
+    # produce the same error message and take the same code path, preventing a
+    # timing/message oracle that could distinguish the two states.
+    if row is None or row.revoked_at is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API key"
         )
     if not constant_time_equal(row.key_hash, hash_api_key(key)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API key"
-        )
-    if row.revoked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="API key revoked"
         )
     return row.agent_id
 

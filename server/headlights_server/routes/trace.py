@@ -126,7 +126,8 @@ def trace_json_endpoint(
 def _verify(records: list[dict[str, Any]], public_key_pem: str | None) -> dict[str, Any]:
     """Run the chain primitive's verify(). Returns a small dict for the HTML."""
     if not records:
-        return {"is_intact": False, "reason": "empty trace", "failed_position": None}
+        return {"is_intact": False, "reason": "empty trace", "failed_position": None,
+                "signature_checked": False}
     try:
         chain = Chain.from_records(records)
         verifying_key = (
@@ -137,6 +138,7 @@ def _verify(records: list[dict[str, Any]], public_key_pem: str | None) -> dict[s
         result = chain.verify(verifying_key=verifying_key)
         return {
             "is_intact": result.is_intact,
+            "is_closed": result.is_closed,
             "reason": result.reason,
             "failed_position": result.failed_position,
             "signature_checked": verifying_key is not None,
@@ -144,9 +146,41 @@ def _verify(records: list[dict[str, Any]], public_key_pem: str | None) -> dict[s
     except Exception as exc:  # noqa: BLE001
         return {
             "is_intact": False,
+            "is_closed": False,
             "reason": f"verification error: {type(exc).__name__}",
             "failed_position": None,
+            "signature_checked": False,
         }
+
+
+# Badge states for the public trace page.
+# A green "CHAIN INTACT" badge is reserved for: hash-chain intact AND session
+# closed AND signatures were verified against a stored public key.
+# Anything less gets a distinct amber state so viewers are never misled about
+# the strength of the assurance.
+_BADGE_GREEN  = "green"   # intact + closed + signatures verified
+_BADGE_AMBER  = "amber"   # intact + closed, but no signature verification
+_BADGE_OPEN   = "open"    # chain ok but session not yet closed (truncatable)
+_BADGE_BROKEN = "broken"  # hash-chain integrity failure
+
+
+def _badge_state(verification: dict[str, Any]) -> str:
+    if not verification["is_intact"]:
+        return _BADGE_BROKEN
+    if not verification.get("is_closed", False):
+        return _BADGE_OPEN
+    if not verification.get("signature_checked", False):
+        return _BADGE_AMBER
+    return _BADGE_GREEN
+
+
+_BADGE_META: dict[str, tuple[str, str, str]] = {
+    # state -> (hex_colour, dot_colour, label)
+    _BADGE_GREEN:  ("#3fb950", "#3fb950", "CHAIN INTACT · SIGNED"),
+    _BADGE_AMBER:  ("#d29922", "#d29922", "CHAIN INTACT · HASH ONLY"),
+    _BADGE_OPEN:   ("#d29922", "#d29922", "OPEN SESSION · NOT FINALISED"),
+    _BADGE_BROKEN: ("#f85149", "#f85149", "CHAIN BROKEN"),
+}
 
 
 def _render_trace_html(
@@ -158,14 +192,21 @@ def _render_trace_html(
     verification: dict[str, Any],
 ) -> str:
     """Server-side render the trace as HTML. No JS framework; one self-contained page."""
-    intact = verification["is_intact"]
-    badge_color = "#3fb950" if intact else "#f85149"
-    badge_text = "CHAIN INTACT" if intact else "CHAIN BROKEN"
+    state = _badge_state(verification)
+    badge_color, _dot_color, badge_text = _BADGE_META[state]
+
     badge_detail = ""
-    if not intact:
+    if state == _BADGE_BROKEN:
         reason = verification.get("reason") or "unknown"
         pos = verification.get("failed_position")
-        badge_detail = f"at position {pos}: {html.escape(reason)}" if pos is not None else html.escape(reason)
+        badge_detail = (
+            f"at position {pos}: {html.escape(reason)}" if pos is not None
+            else html.escape(reason)
+        )
+    elif state == _BADGE_OPEN:
+        badge_detail = "Session is still open — records may still be appended. Close the session to finalise the chain."
+    elif state == _BADGE_AMBER:
+        badge_detail = "Hash chain verified. No public key on file — record signatures were NOT checked."
 
     sig_status = ""
     if verification.get("signature_checked"):
@@ -246,6 +287,7 @@ h2 {{ font-size: 18px; margin: 36px 0 16px; }}
 .outcome.success {{ background: rgba(63, 185, 80, 0.15); color: var(--good); }}
 .outcome.failure {{ background: rgba(248, 81, 73, 0.15); color: var(--bad); }}
 .outcome.partial {{ background: rgba(210, 153, 34, 0.15); color: var(--warn); }}
+.outcome.unknown {{ background: rgba(110, 122, 138, 0.15); color: var(--fg-faint); }}
 .record-detail {{ font-family: var(--mono); font-size: 12px; color: var(--fg-dim); background: var(--bg); padding: 10px 12px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; margin-top: 8px; }}
 .hash-line {{ font-family: var(--mono); font-size: 11px; color: var(--fg-faint); margin-top: 8px; }}
 .hash-line span {{ margin-right: 16px; }}
@@ -271,8 +313,8 @@ footer p {{ margin: 4px 0; }}
   <div class="eyebrow">Headlights · Public conduct trace</div>
   <h1>{html.escape(agent_name)}</h1>
   <div class="subtitle">Session <span class="mono">{html.escape(session.session_id)}</span></div>
-  <div class="status"><span class="dot"></span>{badge_text}</div>
-  {f'<span class="status-detail">{badge_detail}</span>' if badge_detail else ''}
+  <div class="status"><span class="dot"></span>{html.escape(badge_text)}</div>
+  {f'<span class="status-detail">{html.escape(badge_detail)}</span>' if badge_detail else ''}
 </header>
 
 <section>
@@ -281,7 +323,7 @@ footer p {{ margin: 4px 0; }}
     <div class="meta-row"><span class="k">Started at</span><span class="v">{html.escape(session.started_at)}</span></div>
     {closed_at_line}
     <div class="meta-row"><span class="k">Records</span><span class="v mono">{len(records)}</span></div>
-    <div class="meta-row"><span class="k">Signatures</span><span class="v">{sig_status}</span></div>
+    <div class="meta-row"><span class="k">Signatures</span><span class="v">{html.escape(sig_status)}</span></div>
   </div>
 
   <div class="actions">
@@ -337,7 +379,12 @@ def _render_record_card(position: int, record: dict[str, Any]) -> str:
     )
 
     detail_json = html.escape(json.dumps(detail, indent=2, sort_keys=True))
-    outcome_class = outcome if outcome in ("success", "failure", "partial") else "success"
+
+    # Normalise outcome to a known CSS class so arbitrary strings can never
+    # be injected into a class attribute, even if the record was tampered
+    # with directly in the database.
+    known_outcomes = {"success", "failure", "partial"}
+    outcome_class = html.escape(outcome if outcome in known_outcomes else "unknown")
 
     return f"""
   <div class="{record_class}">

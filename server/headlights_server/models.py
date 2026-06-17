@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from headlights_chain.enums import ActionType, Outcome, TrustLevel
+
+# Maximum serialised byte length for action_detail / genesis_detail.
+# Prevents a single oversized record from exhausting SQLite page budget or
+# ballooning public trace HTML.
+_ACTION_DETAIL_MAX_BYTES = 65_536  # 64 KiB
 
 
 # ── Registration ────────────────────────────────────────────────────────
@@ -35,6 +41,16 @@ class RegisterAgentResponse(BaseModel):
 class OpenSessionRequest(BaseModel):
     trust_level: TrustLevel = TrustLevel.L1
     genesis_detail: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("genesis_detail")
+    @classmethod
+    def _check_genesis_detail_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        serialised = json.dumps(v)
+        if len(serialised.encode()) > _ACTION_DETAIL_MAX_BYTES:
+            raise ValueError(
+                f"genesis_detail exceeds {_ACTION_DETAIL_MAX_BYTES // 1024} KiB limit"
+            )
+        return v
 
 
 class OpenSessionResponse(BaseModel):
@@ -100,6 +116,16 @@ class AppendActionRequest(BaseModel):
     latency_ms: int | None = Field(default=None, ge=0)
     jurisdiction: str | None = None
 
+    @field_validator("action_detail")
+    @classmethod
+    def _check_action_detail_size(cls, v: dict[str, Any]) -> dict[str, Any]:
+        serialised = json.dumps(v)
+        if len(serialised.encode()) > _ACTION_DETAIL_MAX_BYTES:
+            raise ValueError(
+                f"action_detail exceeds {_ACTION_DETAIL_MAX_BYTES // 1024} KiB limit"
+            )
+        return v
+
 
 class AppendActionResponse(BaseModel):
     session_id: str
@@ -110,6 +136,9 @@ class AppendActionResponse(BaseModel):
 
 # ── Conduct retrieval ───────────────────────────────────────────────────
 
+# Maximum records returned in a single GET /conduct response.
+CONDUCT_PAGE_SIZE = 1_000
+
 
 class ConductResponse(BaseModel):
     """Records returned by GET /conduct endpoints."""
@@ -119,6 +148,13 @@ class ConductResponse(BaseModel):
     agent_id: str
     record_count: int
     records: list[dict[str, Any]]
+    next_cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque cursor for the next page. Pass as `cursor=` to retrieve the next batch. "
+            "Null when no further records exist."
+        ),
+    )
 
 
 # ── Error envelope ──────────────────────────────────────────────────────

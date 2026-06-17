@@ -47,7 +47,7 @@ def open_session(
     trust_level: TrustLevel,
     genesis_detail: dict[str, Any],
 ) -> tuple[str, int, str, str]:
-    """Open a session: write the SessionRow and the genesis Record.
+    """Open a session: write the SessionRow and the genesis Record atomically.
 
     Returns (session_id, position=0, record_hash_hex, started_at).
     """
@@ -69,17 +69,15 @@ def open_session(
     )
     canonical_dict = record.to_canonical_dict()
 
-    store.create_session(
-        SessionRow(
+    # Atomic: session row + genesis record commit together or not at all.
+    store.open_session_atomic(
+        session=SessionRow(
             session_id=record.session_id,
             agent_id=agent_id,
             started_at=started_at,
             closed_at=None,
             session_hash=None,
-        )
-    )
-    store.append_record(
-        session_id=record.session_id,
+        ),
         position=0,
         record_id=record.record_id,
         timestamp=record.timestamp,
@@ -101,11 +99,17 @@ def append_action(
     trust_level: TrustLevel,
     optional_fields: dict[str, Any] | None = None,
 ) -> tuple[int, str, str]:
-    """Append an action record. Returns (position, record_id, record_hash_hex)."""
+    """Append an action record atomically. Returns (position, record_id, record_hash_hex).
+
+    Uses append_record_atomic so that get-last-position and insert happen in a
+    single locked transaction, preventing the chain-forking race condition where
+    two concurrent appends read the same last position and collide on the
+    (session_id, position) PRIMARY KEY.
+    """
     last = store.get_last_record(session_id)
     if last is None:
         raise LookupError(f"session {session_id} has no genesis record")
-    prev_position, prev_dict = last
+    _prev_position, prev_dict = last
 
     prev_complete_hash = record_hash_for_chain(prev_dict)
     record = Record.new(
@@ -121,11 +125,11 @@ def append_action(
         **(optional_fields or {}),
     )
     canonical_dict = record.to_canonical_dict()
-    new_position = prev_position + 1
 
-    store.append_record(
+    # append_record_atomic computes MAX(position)+1 and inserts in one locked
+    # transaction — no two concurrent callers can read the same last position.
+    new_position = store.append_record_atomic(
         session_id=session_id,
-        position=new_position,
         record_id=record.record_id,
         timestamp=record.timestamp,
         canonical_json=_canonical_to_json(canonical_dict),
@@ -141,7 +145,11 @@ def close_session(
     session_id: str,
     trust_level: TrustLevel = TrustLevel.L1,
 ) -> tuple[int, str, str]:
-    """Close a session per AAT §6.3. Returns (record_count, session_hash, closed_at)."""
+    """Close a session per AAT §6.3. Returns (record_count, session_hash, closed_at).
+
+    The session_end record insert and the sessions.closed_at update are committed
+    in a single atomic transaction — no half-closed state on crash.
+    """
     records = store.get_session_records(session_id)
     if not records:
         raise LookupError(f"session {session_id} has no records")
@@ -177,14 +185,17 @@ def close_session(
     )
     canonical_dict = record.to_canonical_dict()
     new_position = len(records)
-    store.append_record(
+
+    # Atomic: session_end record + sessions.closed_at commit together or not at all.
+    store.close_session_atomic(
         session_id=session_id,
-        position=new_position,
+        session_hash=session_hash,
+        closed_at=closed_at,
         record_id=record.record_id,
         timestamp=record.timestamp,
         canonical_json=_canonical_to_json(canonical_dict),
+        position=new_position,
     )
-    store.close_session(session_id, session_hash, closed_at)
     return (new_position + 1, session_hash, closed_at)
 
 

@@ -1,5 +1,6 @@
 """Agent registration endpoint."""
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +15,12 @@ from headlights_server.config import Settings
 from headlights_server.deps import get_settings, get_store
 from headlights_server.models import RegisterAgentRequest, RegisterAgentResponse
 from headlights_server.storage import AgentRow, ApiKeyRow, Store
+
+# TODO: add per-IP rate limiting (e.g. slowapi) before public deployment.
+# POST /v1/agents is unauthenticated; without a rate limit an attacker can
+# exhaust disk and enumerate key-prefix space by registering agents in bulk.
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 
@@ -32,33 +39,32 @@ def register_agent(
     agent_id = make_agent_id(settings.agent_id_prefix, body.agent_name)
     created_at = utc_now()
 
-    store.create_agent(
-        AgentRow(
-            agent_id=agent_id,
-            agent_name=body.agent_name,
-            owner_email=body.owner_email,
-            purpose=body.purpose,
-            agent_version=body.agent_version,
-            public_key_pem=body.public_key_pem,
-            created_at=created_at,
-        )
+    api_key = generate_api_key(settings.api_key_prefix)
+    key_row = ApiKeyRow(
+        key_prefix=key_prefix(api_key),
+        key_hash=hash_api_key(api_key),
+        agent_id=agent_id,
+        created_at=created_at,
+        revoked_at=None,
+    )
+    agent_row = AgentRow(
+        agent_id=agent_id,
+        agent_name=body.agent_name,
+        owner_email=body.owner_email,
+        purpose=body.purpose,
+        agent_version=body.agent_version,
+        public_key_pem=body.public_key_pem,
+        created_at=created_at,
     )
 
-    api_key = generate_api_key(settings.api_key_prefix)
     try:
-        store.create_api_key(
-            ApiKeyRow(
-                key_prefix=key_prefix(api_key),
-                key_hash=hash_api_key(api_key),
-                agent_id=agent_id,
-                created_at=created_at,
-                revoked_at=None,
-            )
-        )
-    except Exception as e:
+        # Atomic: agent row + API key committed together; no orphaned agents.
+        store.create_agent_with_key(agent_row, key_row)
+    except Exception:
+        logger.exception("failed to register agent %s", agent_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"failed to provision API key: {e}",
+            detail="internal error registering agent",
         )
 
     return RegisterAgentResponse(

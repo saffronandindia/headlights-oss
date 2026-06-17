@@ -12,7 +12,12 @@ def _auth(key: str) -> dict[str, str]:
 
 
 def _session_with_actions(
-    client: TestClient, agent_id: str, api_key: str, n_actions: int = 3
+    client: TestClient,
+    agent_id: str,
+    api_key: str,
+    n_actions: int = 3,
+    *,
+    close: bool = False,
 ) -> str:
     """Open a session and append n_actions. Returns session_id."""
     open_resp = client.post(
@@ -35,6 +40,12 @@ def _session_with_actions(
             headers=_auth(api_key),
         )
         assert r.status_code == 201
+    if close:
+        cr = client.post(
+            f"/v1/agents/{agent_id}/sessions/{session_id}/close",
+            headers=_auth(api_key),
+        )
+        assert cr.status_code == 200
     return session_id
 
 
@@ -129,7 +140,8 @@ def test_trace_html_200_after_publish(
     client: TestClient, registered_agent: tuple[str, str]
 ) -> None:
     agent_id, key = registered_agent
-    sid = _session_with_actions(client, agent_id, key, 2)
+    # Session must be closed for the badge to show CHAIN INTACT (not OPEN SESSION).
+    sid = _session_with_actions(client, agent_id, key, 2, close=True)
     client.post(
         f"/v1/agents/{agent_id}/sessions/{sid}/publish",
         json={"public": True},
@@ -142,8 +154,9 @@ def test_trace_html_200_after_publish(
     # Branding signals
     assert "Headlights" in body
     assert sid in body
-    # Verification badge
+    # Verification badge — closed + no public key → amber hash-only badge
     assert "CHAIN INTACT" in body
+    assert "HASH ONLY" in body
     # Records rendered as cards
     assert "step_0" in body
     assert "step_1" in body
@@ -273,7 +286,11 @@ def test_end_to_end_email_demo_loop(
     # 3. Prospect (no auth) loads the HTML page
     html_resp = client.get(trace_url)
     assert html_resp.status_code == 200
+    # Closed session, no public key on file → amber "CHAIN INTACT · HASH ONLY" badge.
     assert "CHAIN INTACT" in html_resp.text
+    assert "HASH ONLY" in html_resp.text
+    # Must NOT show OPEN SESSION
+    assert "OPEN SESSION" not in html_resp.text
 
     # 4. Prospect downloads the JSON
     json_resp = client.get(trace_url + ".json")

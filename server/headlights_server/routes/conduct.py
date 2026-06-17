@@ -1,5 +1,6 @@
 """Session and conduct endpoints — open, append, close, retrieve."""
 
+import re
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -15,6 +16,7 @@ from headlights_server.models import (
     AppendActionRequest,
     AppendActionResponse,
     CloseSessionResponse,
+    CONDUCT_PAGE_SIZE,
     ConductResponse,
     OpenSessionRequest,
     OpenSessionResponse,
@@ -22,6 +24,21 @@ from headlights_server.models import (
 from headlights_server.storage import Store
 
 router = APIRouter(prefix="/v1/agents", tags=["conduct"])
+
+# Loose RFC 3339 pattern accepted as since/until values.
+# Full validation is left to SQLite's text comparison, but obviously
+# malformed values are rejected early with a 422.
+_RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
+)
+
+
+def _validate_timestamp(value: str | None, name: str) -> None:
+    if value is not None and not _RFC3339_RE.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{name} must be an RFC 3339 timestamp (e.g. 2024-01-01T00:00:00Z)",
+        )
 
 
 @router.post(
@@ -172,19 +189,40 @@ def append_action_endpoint(
 @router.get(
     "/{agent_id}/conduct",
     response_model=ConductResponse,
-    summary="List all records for an agent. Supports time-range filtering.",
+    summary=(
+        "List records for an agent. Supports time-range filtering and cursor pagination. "
+        f"Returns at most {CONDUCT_PAGE_SIZE} records per page."
+    ),
 )
 def get_conduct_endpoint(
     agent_id: Annotated[str, Depends(require_api_key_for_agent)],
     store: Annotated[Store, Depends(get_store)],
     since: Annotated[Optional[str], Query(description="RFC 3339 lower bound (inclusive)")] = None,
     until: Annotated[Optional[str], Query(description="RFC 3339 upper bound (inclusive)")] = None,
+    cursor: Annotated[Optional[str], Query(description="Opaque pagination cursor from a previous response")] = None,
 ) -> ConductResponse:
-    records = store.get_agent_records(agent_id, since=since, until=until)
+    _validate_timestamp(since, "since")
+    _validate_timestamp(until, "until")
+    _validate_timestamp(cursor, "cursor")
+
+    # Fetch one extra record to determine whether a next page exists.
+    records = store.get_agent_records(
+        agent_id,
+        since=since,
+        until=until,
+        cursor=cursor,
+        limit=CONDUCT_PAGE_SIZE + 1,
+    )
+    next_cursor: str | None = None
+    if len(records) > CONDUCT_PAGE_SIZE:
+        records = records[:CONDUCT_PAGE_SIZE]
+        next_cursor = records[-1].get("timestamp")
+
     return ConductResponse(
         agent_id=agent_id,
         record_count=len(records),
         records=records,
+        next_cursor=next_cursor,
     )
 
 

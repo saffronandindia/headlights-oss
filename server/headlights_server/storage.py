@@ -58,6 +58,13 @@ class Store(ABC):
     @abstractmethod
     def create_api_key(self, row: ApiKeyRow) -> None: ...
     @abstractmethod
+    def create_agent_with_key(self, agent: AgentRow, key: ApiKeyRow) -> None:
+        """Atomically insert an agent row and its initial API key.
+
+        Must commit both or neither — no orphaned agent rows.
+        """
+        ...
+    @abstractmethod
     def lookup_api_key(self, key_prefix: str) -> ApiKeyRow | None: ...
     @abstractmethod
     def create_session(self, session: SessionRow) -> None: ...
@@ -72,6 +79,55 @@ class Store(ABC):
     @abstractmethod
     def append_record(self, *, session_id: str, position: int, record_id: str, timestamp: str, canonical_json: str) -> None: ...
     @abstractmethod
+    def open_session_atomic(
+        self,
+        *,
+        session: SessionRow,
+        position: int,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+    ) -> None:
+        """Atomically write the SessionRow and the genesis record.
+
+        Must commit both or neither — no orphaned session rows.
+        """
+        ...
+    @abstractmethod
+    def append_record_atomic(
+        self,
+        *,
+        session_id: str,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+    ) -> int:
+        """Atomically determine the next position and insert the record.
+
+        Uses a single locked transaction: SELECT MAX(position)+1 then INSERT.
+        Returns the position that was written.
+        Raises sqlite3.IntegrityError if the (session_id, position) PK is
+        somehow already taken (should not happen under the lock).
+        """
+        ...
+    @abstractmethod
+    def close_session_atomic(
+        self,
+        *,
+        session_id: str,
+        session_hash: str,
+        closed_at: str,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+        position: int,
+    ) -> None:
+        """Atomically write the session_end record and mark the session closed.
+
+        Must commit both or neither.
+        """
+        ...
+    @abstractmethod
     def get_record_at(self, session_id: str, position: int) -> dict[str, Any] | None: ...
     @abstractmethod
     def get_last_record(self, session_id: str) -> tuple[int, dict[str, Any]] | None: ...
@@ -80,7 +136,7 @@ class Store(ABC):
     @abstractmethod
     def get_session_record_count(self, session_id: str) -> int: ...
     @abstractmethod
-    def get_agent_records(self, agent_id: str, *, since: str | None = None, until: str | None = None) -> list[dict[str, Any]]: ...
+    def get_agent_records(self, agent_id: str, *, since: str | None = None, until: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[dict[str, Any]]: ...
 
 
 SCHEMA = """
@@ -168,6 +224,26 @@ class SQLiteStore(Store):
                 (row.key_prefix, row.key_hash, row.agent_id, row.created_at, row.revoked_at),
             )
 
+    def create_agent_with_key(self, agent: AgentRow, key: ApiKeyRow) -> None:
+        """Atomically insert an agent row and its initial API key in one transaction."""
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO agents (agent_id, agent_name, owner_email, purpose, agent_version, public_key_pem, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (agent.agent_id, agent.agent_name, agent.owner_email, agent.purpose, agent.agent_version, agent.public_key_pem, agent.created_at),
+                )
+                cur.execute(
+                    "INSERT INTO api_keys (key_prefix, key_hash, agent_id, created_at, revoked_at) VALUES (?, ?, ?, ?, ?)",
+                    (key.key_prefix, key.key_hash, key.agent_id, key.created_at, key.revoked_at),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
+
     def lookup_api_key(self, key_prefix: str) -> ApiKeyRow | None:
         with self._cursor() as cur:
             cur.execute("SELECT key_prefix, key_hash, agent_id, created_at, revoked_at FROM api_keys WHERE key_prefix = ?", (key_prefix,))
@@ -180,6 +256,34 @@ class SQLiteStore(Store):
                 "INSERT INTO sessions (session_id, agent_id, started_at, closed_at, session_hash, public_view) VALUES (?, ?, ?, ?, ?, ?)",
                 (session.session_id, session.agent_id, session.started_at, session.closed_at, session.session_hash, 1 if session.public_view else 0),
             )
+
+    def open_session_atomic(
+        self,
+        *,
+        session: SessionRow,
+        position: int,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+    ) -> None:
+        """Atomically write the SessionRow and the genesis record in one transaction."""
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO sessions (session_id, agent_id, started_at, closed_at, session_hash, public_view) VALUES (?, ?, ?, ?, ?, ?)",
+                    (session.session_id, session.agent_id, session.started_at, session.closed_at, session.session_hash, 1 if session.public_view else 0),
+                )
+                cur.execute(
+                    "INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)",
+                    (session.session_id, position, record_id, timestamp, canonical_json),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
 
     def get_session(self, session_id: str) -> SessionRow | None:
         with self._cursor() as cur:
@@ -207,6 +311,70 @@ class SQLiteStore(Store):
         with self._cursor() as cur:
             cur.execute("INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)", (session_id, position, record_id, timestamp, canonical_json))
 
+    def append_record_atomic(
+        self,
+        *,
+        session_id: str,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+    ) -> int:
+        """Atomically determine next position and insert record in one locked transaction.
+
+        Returns the position written. Raises sqlite3.IntegrityError on PK collision
+        (should not occur since position is computed under the same lock).
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM records WHERE session_id = ?",
+                    (session_id,),
+                )
+                last_pos = cur.fetchone()[0]
+                new_position = last_pos + 1
+                cur.execute(
+                    "INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)",
+                    (session_id, new_position, record_id, timestamp, canonical_json),
+                )
+                self._conn.commit()
+                return new_position
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+    def close_session_atomic(
+        self,
+        *,
+        session_id: str,
+        session_hash: str,
+        closed_at: str,
+        record_id: str,
+        timestamp: str,
+        canonical_json: str,
+        position: int,
+    ) -> None:
+        """Atomically insert the session_end record and mark the session closed."""
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)",
+                    (session_id, position, record_id, timestamp, canonical_json),
+                )
+                cur.execute(
+                    "UPDATE sessions SET closed_at = ?, session_hash = ? WHERE session_id = ?",
+                    (closed_at, session_hash, session_id),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
+
     def get_record_at(self, session_id, position):
         with self._cursor() as cur:
             cur.execute("SELECT canonical_json FROM records WHERE session_id = ? AND position = ?", (session_id, position))
@@ -230,15 +398,20 @@ class SQLiteStore(Store):
             cur.execute("SELECT COUNT(*) FROM records WHERE session_id = ?", (session_id,))
             return cur.fetchone()[0]
 
-    def get_agent_records(self, agent_id, *, since=None, until=None):
+    def get_agent_records(self, agent_id, *, since=None, until=None, limit=None, cursor=None):
         clauses = ["s.agent_id = ?"]
-        params = [agent_id]
+        params: list[Any] = [agent_id]
         if since is not None:
             clauses.append("r.timestamp >= ?"); params.append(since)
         if until is not None:
             clauses.append("r.timestamp <= ?"); params.append(until)
+        if cursor is not None:
+            # cursor is an opaque RFC 3339 timestamp; return records strictly after it
+            clauses.append("r.timestamp > ?"); params.append(cursor)
         sql = ("SELECT r.canonical_json FROM records r JOIN sessions s ON s.session_id = r.session_id "
                f"WHERE {' AND '.join(clauses)} ORDER BY r.timestamp ASC, r.session_id ASC, r.position ASC")
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
         with self._cursor() as cur:
             cur.execute(sql, params)
             return [json.loads(row[0]) for row in cur.fetchall()]
