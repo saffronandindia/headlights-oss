@@ -113,3 +113,48 @@ def test_leap_second_and_nanosecond_timestamps_accepted():
             timestamp=ts,
         )
         assert r.timestamp == ts
+
+
+# ── additional coverage added after SHOULD-FIX audit ────────────────────────
+
+
+def test_unsigned_chain_with_verifying_key_signatures_checked_false():
+    """Providing a verifying key against an unsigned chain should NOT mark
+    signatures as checked — the flag must reflect that no signatures existed."""
+    _, verifying = generate_keypair()
+    c = _chain()  # no signing key
+    c.append(
+        action_type=ActionType.DECISION,
+        action_detail={"x": 1},
+        outcome=Outcome.SUCCESS,
+        trust_level=TrustLevel.L1,
+    )
+    r = c.verify(verifying_key=verifying)
+    assert r.is_intact is True
+    assert r.signatures_checked is False  # no records had a signature
+    assert r.is_closed is False
+
+
+def test_open_chain_is_closed_false():
+    """An open (not session_end-terminated) chain must report is_closed=False."""
+    signing, verifying = generate_keypair()
+    c = _chain(signing)
+    r = c.verify(verifying_key=verifying)
+    assert r.is_intact is True
+    assert r.is_closed is False
+
+
+def test_closed_unsigned_chain_is_closed_true_signatures_checked_false():
+    """A closed but unsigned chain: is_closed=True, signatures_checked=False."""
+    c = _chain()  # no signing key
+    c.append(
+        action_type=ActionType.DECISION,
+        action_detail={"x": 1},
+        outcome=Outcome.SUCCESS,
+        trust_level=TrustLevel.L1,
+    )
+    c.close()
+    r = c.verify()  # no verifying key
+    assert r.is_intact is True
+    assert r.is_closed is True
+    assert r.signatures_checked is False
