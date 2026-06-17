@@ -19,6 +19,13 @@ Gate layer (enforce before the action, in order)::
     )
 """
 
+from headlights_sdk.guards.adversarial import (
+    DEFAULT_ATTACKS,
+    AdversarialSuite,
+    AttackPattern,
+    AttackResult,
+    SuiteResult,
+)
 from headlights_sdk.guards.authority import AuthorityGate
 from headlights_sdk.guards.base import Guard, GuardDenied, GuardResult
 from headlights_sdk.guards.citation import CitationVerifier
@@ -44,4 +51,10 @@ __all__ = [
     "CitationVerifier",
     "VerificationGate",
     "EgressGate",
+    # Companion: pre-deployment adversarial test suite
+    "AdversarialSuite",
+    "AttackPattern",
+    "AttackResult",
+    "SuiteResult",
+    "DEFAULT_ATTACKS",
 ]
