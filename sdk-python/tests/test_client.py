@@ -50,7 +50,8 @@ def test_decorator_records_error_and_reraises() -> None:
     assert err.action_type == ActionType.ERROR
     assert err.outcome == Outcome.FAILURE
     assert err.action_detail["error_code"] == "RuntimeError"
-    assert err.action_detail["error_message"] == "boom"
+    assert err.action_detail["error_message_hash"].startswith("sha256:")
+    assert "boom" not in str(err.action_detail)  # raw message must not be stored
     assert err.action_detail["recoverable"] is False
 
 

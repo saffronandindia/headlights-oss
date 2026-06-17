@@ -15,7 +15,13 @@ from headlights_chain.enums import ActionType, Outcome
 
 
 class MetricRecord:
-    """Write a signed aggregate metric bound to the chain root."""
+    """Write a signed aggregate metric bound to the chain root.
+
+    Requires an active session: the metric binds to the current chain root, so a
+    chain must already exist (open a session or record at least one event first).
+    ``write`` raises ``RuntimeError`` otherwise, even under ``auto_session``,
+    because a metric bound to nothing is not provable.
+    """
 
     name = "MetricRecord"
 
@@ -46,8 +52,12 @@ class MetricRecord:
             detail["sample_size"] = sample_size
 
         chain = self._client.chain
-        if chain is not None:
-            detail["chain_root"] = chain.state.last_hash
+        if chain is None:
+            raise RuntimeError(
+                "MetricRecord requires an active session so the aggregate is bound "
+                "to the chain root; record at least one event (or open a session) first."
+            )
+        detail["chain_root"] = chain.state.last_hash
 
         detail.update(extra)
 

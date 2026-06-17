@@ -218,7 +218,7 @@ class Client:
             action_type=ActionType.ERROR,
             action_detail={
                 "error_code": type(exc).__name__,
-                "error_message": str(exc),
+                "error_message_hash": f"sha256:{hash_value(str(exc))}",
                 "error_category": ErrorCategory.INTERNAL.value,
                 "recoverable": False,
                 "tool_name": tool_name,

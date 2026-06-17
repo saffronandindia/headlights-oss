@@ -128,7 +128,7 @@ def test_citation_verifier_allows_all_real() -> None:
 
 def test_citation_verifier_enforce_raises() -> None:
     client = _client()
-    verifier = CitationVerifier(client, known_valid=set())
+    verifier = CitationVerifier(client, known_valid={"1"})
     with pytest.raises(GuardDenied, match="CitationVerifier"):
         verifier.enforce(content="A claim with citation [42].")
 

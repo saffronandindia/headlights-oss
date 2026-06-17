@@ -121,6 +121,8 @@ class VerifyingKey:
         """
         if len(digest_32) != 32:
             return False
+        if not isinstance(signature_b64url, str):
+            return False
         try:
             p1363 = _b64url_decode_nopad(signature_b64url)
             der = _p1363_to_der(p1363)

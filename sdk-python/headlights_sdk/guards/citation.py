@@ -39,6 +39,13 @@ class CitationVerifier(Guard):
         self._known_valid: set[str] = set(known_valid or ())
         # verifier queries a trusted source; returns True if the citation is real.
         self._verifier = verifier
+        if not self._known_valid and self._verifier is None:
+            raise ValueError(
+                "CitationVerifier needs at least one of known_valid or verifier; "
+                "with neither, every citation is denied as unverified. Note that "
+                "unverified citation tokens are written to the record, so they "
+                "should not contain PII."
+            )
         self._pattern: Pattern[str] = (
             citation_pattern
             if isinstance(citation_pattern, re.Pattern)

@@ -49,7 +49,12 @@ class EgressGate(Guard):
         return [label for label, pat in self._patterns.items() if pat.search(content)]
 
     def check(self, *, content: str, destination: str) -> GuardResult:
-        """Record an egress decision for ``content`` -> ``destination``."""
+        """Record an egress decision for ``content`` -> ``destination``.
+
+        When the destination is trusted but sensitive patterns still matched,
+        ``detail["sensitive_to_trusted"]`` is set True so auditors can find
+        allowed-but-sensitive egress.
+        """
         trusted = destination in self._trusted
         categories = self.classify(content)
         blocked = (not trusted) and bool(categories)
@@ -63,6 +68,10 @@ class EgressGate(Guard):
             # The raw content is deliberately omitted; only its hash is recorded.
             "content_hash": f"sha256:{hash_value(content)}",
         }
+        if trusted and categories:
+            # Allowed because the destination is trusted, but sensitive data was
+            # present; flag it so auditors can find allowed-but-sensitive egress.
+            detail["sensitive_to_trusted"] = True
 
         outcome = Outcome.DENIED if blocked else Outcome.SUCCESS
         position = self._record(outcome=outcome, detail=detail)

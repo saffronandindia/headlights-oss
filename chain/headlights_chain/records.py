@@ -118,6 +118,17 @@ class Record(BaseModel):
             raise ValueError(
                 f"timestamp must match RFC 3339 with UTC offset; got {v!r}"
             )
+        # Validate the actual calendar date/time. Python's datetime has no
+        # leap-second support and (before 3.11) caps fractional digits at 6, so
+        # normalise a copy purely for parsing: clip fractions to microseconds and
+        # fold a :60 leap second to :59. RFC 3339 still treats both as valid.
+        probe = v.replace("Z", "+00:00")
+        probe = re.sub(r"(\.\d{6})\d+", r"\1", probe)
+        probe = re.sub(r"T(\d{2}:\d{2}):60", r"T\1:59", probe)
+        try:
+            datetime.fromisoformat(probe)
+        except ValueError as e:
+            raise ValueError(f"timestamp is not a valid calendar date/time: {v!r}") from e
         return v
 
     @field_validator("agent_version")

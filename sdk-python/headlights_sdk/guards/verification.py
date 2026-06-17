@@ -40,7 +40,19 @@ class VerificationGate(Guard):
         self._source = source
 
     def check(self, *, claim: Any) -> GuardResult:
-        verified = bool(self._source(claim))
+        try:
+            verified = bool(self._source(claim))
+        except Exception as exc:
+            self._record(
+                outcome=Outcome.FAILURE,
+                detail={
+                    "decision": "error",
+                    "check": "verification_against_trusted_source",
+                    "claim_hash": f"sha256:{hash_value(claim)}",
+                    "error_code": type(exc).__name__,
+                },
+            )
+            raise
 
         detail: dict[str, Any] = {
             "decision": "allow" if verified else "deny",

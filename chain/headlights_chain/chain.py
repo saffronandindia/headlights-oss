@@ -52,10 +52,12 @@ class VerificationResult:
     is_intact: bool
     failed_position: int | None
     reason: str | None
+    is_closed: bool = False
+    signatures_checked: bool = False
 
     @classmethod
-    def ok(cls) -> "VerificationResult":
-        return cls(True, None, None)
+    def ok(cls, *, is_closed: bool = False, signatures_checked: bool = False) -> "VerificationResult":
+        return cls(True, None, None, is_closed, signatures_checked)
 
     @classmethod
     def fail(cls, position: int, reason: str) -> "VerificationResult":
@@ -218,6 +220,41 @@ class Chain:
         self._records.append(record)
         return (len(self._records) - 1, record_hash_for_chain(record.to_canonical_dict()))
 
+    def tombstone(
+        self,
+        *,
+        target_record_id: str,
+        reason: str | None = None,
+        trust_level: TrustLevel | str | None = None,
+        timestamp: str | None = None,
+    ) -> tuple[int, str]:
+        """Append an AAT §6 tombstone marking a prior record's content as deleted.
+
+        The target record is NOT removed (removing it would break the hash links;
+        keeping deletions auditable is the whole point). This appends a
+        lifecycle/record_deleted marker referencing the target, so a verifier can
+        see a deletion happened, when, and optionally why. Redacting the target's
+        payload at the storage layer is the caller's responsibility; this is the
+        evidence that it was done.
+
+        Note: ``reason`` is stored verbatim in the (immutable) record. Do not
+        put PII, personal identifiers, or raw content in it; keep it to a
+        category or ticket reference.
+        """
+        detail: dict[str, Any] = {
+            "event": LifecycleEvent.RECORD_DELETED.value,
+            "target_record_id": target_record_id,
+        }
+        if reason is not None:
+            detail["reason"] = reason
+        return self.append(
+            action_type=ActionType.LIFECYCLE,
+            action_detail=detail,
+            outcome=Outcome.SUCCESS,
+            trust_level=trust_level or self._records[-1].trust_level,
+            timestamp=timestamp,
+        )
+
     # ── Inspection ──────────────────────────────────────────────────────
 
     @property
@@ -330,6 +367,17 @@ def _verify_records(
 
     expected_session_id = first.session_id
     expected_agent_id = first.agent_id
+    signatures_checked = verifying_key is not None and any(
+        r.signature is not None for r in records
+    )
+    if (
+        signatures_checked
+        and records[0].signature is None
+        and any(r.signature is not None for r in records[1:])
+    ):
+        return VerificationResult.fail(
+            0, "genesis record is unsigned while later records are signed"
+        )
 
     prev_complete_hash: str | None = None
     prev_record_id: str | None = None
@@ -386,10 +434,11 @@ def _verify_records(
 
     # If closed, validate session_hash claim.
     last = records[-1]
-    if (
+    is_closed = (
         last.action_type == ActionType.LIFECYCLE
         and last.action_detail.get("event") == LifecycleEvent.SESSION_END.value
-    ):
+    )
+    if is_closed:
         claimed = last.action_detail.get("session_hash")
         raw_digests = [
             bytes.fromhex(r.prev_hash)
@@ -409,4 +458,4 @@ def _verify_records(
                 f"record_count mismatch: claimed {expected_count}, actual {len(records)}",
             )
 
-    return VerificationResult.ok()
+    return VerificationResult.ok(is_closed=is_closed, signatures_checked=signatures_checked)

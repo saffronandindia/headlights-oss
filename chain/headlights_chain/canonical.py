@@ -20,7 +20,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-import rfc8785
+import rfc8785  # pin tightly: the whole hash/signature scheme depends on its
+# RFC 8785 (JCS) output staying byte-stable across versions.
 
 # AAT §4.1: "Encode the resulting 32-byte hash as a 64-character lowercase
 # hexadecimal string."

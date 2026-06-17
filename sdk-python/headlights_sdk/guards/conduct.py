@@ -40,6 +40,16 @@ class ConductRecord:
         **extra: Any,
     ) -> tuple[int, str]:
         """Assemble and append a conduct record. Returns ``(position, hash)``."""
+        action_type = (
+            ActionType(action_type)
+            if not isinstance(action_type, ActionType)
+            else action_type
+        )
+        if action_type == ActionType.LIFECYCLE:
+            raise ValueError(
+                "ConductRecord.write() must not emit lifecycle records; that "
+                "would let a caller close the chain. Use Chain.close()/tombstone()."
+            )
         detail: dict[str, Any] = {"record": "conduct"}
         if model_id is not None:
             detail["model_id"] = model_id

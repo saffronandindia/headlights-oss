@@ -80,6 +80,25 @@ Pre-launch alpha (v0.1.0a1). The chain primitive, verifier CLI, SDK (including t
 
 Aligned with the [Agent Audit Trail draft](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/), an individual IETF submission not yet Working-Group adopted. See [`specs/chain.md`](specs/chain.md) and [`specs/decisions.md`](specs/decisions.md) for the protocol details, and [`specs/scorecard-rubric.md`](specs/scorecard-rubric.md) for the conduct scorecard.
 
+## Guarantees and threat model
+
+Tamper-evidence is **not** automatic. Two conditions must hold:
+
+1. **Sign the chain.** Pass a `signing_key`. Hash-linking alone catches accidental
+   corruption, but an attacker who controls the data can recompute the links and
+   forge a consistent *unsigned* chain. `verify(verifying_key=...)` reports
+   `signatures_checked`; treat `signatures_checked is False` as "not cryptographically
+   verified".
+2. **Close the chain and check `is_closed`.** An open chain can be truncated (its
+   tail stripped) and still verify. The session-level integrity check runs only on a
+   closed chain, and `VerificationResult.is_closed` lets a verifier assert it. For
+   proof that a chain existed *before a given time*, anchor the `session_hash`
+   externally (RFC 3161 or OpenTimestamps); the bundled `NoOpAnchor` is for
+   development only and provides no trusted time.
+
+In short: a closed, signed chain verified with the public key is tamper-evident end
+to end. Anything less is weaker, and the `VerificationResult` flags say so.
+
 ## Running the tests
 
 ```bash

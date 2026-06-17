@@ -18,7 +18,7 @@ from typing import Any
 def _json_default(value: Any) -> str:
     """Fallback serialiser for objects json.dumps cannot handle natively."""
     try:
-        return repr(value)
+        return f"{type(value).__module__}.{type(value).__qualname__}:{repr(value)}"
     except Exception:  # noqa: BLE001 — keep the SDK from crashing on exotic objects
         return f"<unrepresentable {type(value).__name__}>"
 

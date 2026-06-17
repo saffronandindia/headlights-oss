@@ -43,7 +43,19 @@ class ConstraintGate(Guard):
     def check(self, *, action: str, parameters: dict[str, Any] | None = None) -> GuardResult:
         parameters = parameters or {}
         breaks_list = action in self._disallowed
-        breaks_policy = self._policy is not None and not self._policy(action, parameters)
+        try:
+            breaks_policy = self._policy is not None and not self._policy(action, parameters)
+        except Exception as exc:
+            self._record(
+                outcome=Outcome.FAILURE,
+                detail={
+                    "decision": "error",
+                    "check": "standing_rules_compliance",
+                    "action": action,
+                    "error_code": type(exc).__name__,
+                },
+            )
+            raise
         compliant = not (breaks_list or breaks_policy)
 
         detail: dict[str, Any] = {
