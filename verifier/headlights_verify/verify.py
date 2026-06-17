@@ -19,7 +19,13 @@ class VerifyError(Exception):
 
 @dataclass(frozen=True)
 class VerifyOutcome:
-    """The result returned by `verify_file`."""
+    """The result returned by ``verify_file``.
+
+    The strength of the guarantee lives on ``result``: ``result.signatures_checked``
+    is True only when signatures were cryptographically verified, and
+    ``result.is_closed`` is True only for a closed chain (an open chain can be
+    truncated and still pass ``is_intact``). Check both before trusting a chain.
+    """
 
     result: VerificationResult
     record_count: int
@@ -46,6 +52,8 @@ def load_records_from_string(text: str) -> list[dict[str, Any]]:
             raise VerifyError(f"invalid JSON: {e}") from e
         if not isinstance(data, list):
             raise VerifyError("expected a JSON array of records")
+        if not all(isinstance(r, dict) for r in data):
+            raise VerifyError("every element of the array must be a JSON object")
         return data
 
     # NDJSON
@@ -91,13 +99,16 @@ def verify_file(
     signatures are verified against that key.
     """
     records = load_records(path)
-    chain = Chain.from_records(records)
+    try:
+        chain = Chain.from_records(records)
+    except Exception as e:  # malformed records (pydantic ValidationError, etc.)
+        raise VerifyError(f"invalid chain data: {e}") from e
 
     verifying_key: VerifyingKey | None = None
     if public_key_pem is not None:
         try:
             verifying_key = VerifyingKey.from_pem(public_key_pem)
-        except ValueError as e:
+        except Exception as e:
             raise VerifyError(f"cannot load public key: {e}") from e
 
     result = chain.verify(verifying_key=verifying_key)
