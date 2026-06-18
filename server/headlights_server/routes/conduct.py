@@ -1,5 +1,7 @@
 """Session and conduct endpoints — open, append, close, retrieve."""
 
+import base64
+import json
 import re
 from typing import Annotated, Optional
 
@@ -38,6 +40,37 @@ def _validate_timestamp(value: str | None, name: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"{name} must be an RFC 3339 timestamp (e.g. 2024-01-01T00:00:00Z)",
+        )
+
+
+def _encode_cursor(timestamp: str, session_id: str, position: int) -> str:
+    """Encode a pagination cursor as an opaque base64url string.
+
+    Encodes the three-tuple (timestamp, session_id, position) that uniquely
+    identifies a record's sort position. This prevents the silent data-skip bug
+    that occurs when multiple records share the same millisecond timestamp at a
+    page boundary and the cursor carries only the timestamp.
+    """
+    payload = json.dumps([timestamp, session_id, position], separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[str, str, int]:
+    """Decode a cursor produced by ``_encode_cursor``.
+
+    Returns (timestamp, session_id, position).
+    Raises HTTPException 422 on malformed input.
+    """
+    try:
+        payload = base64.urlsafe_b64decode(cursor.encode()).decode()
+        ts, sid, pos = json.loads(payload)
+        if not isinstance(ts, str) or not isinstance(sid, str) or not isinstance(pos, int):
+            raise ValueError("unexpected cursor field types")
+        return ts, sid, pos
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="cursor is malformed; use the next_cursor value from a previous response",
         )
 
 
@@ -203,20 +236,28 @@ def get_conduct_endpoint(
 ) -> ConductResponse:
     _validate_timestamp(since, "since")
     _validate_timestamp(until, "until")
-    _validate_timestamp(cursor, "cursor")
+    # cursor is opaque base64url — decode it rather than validating as RFC 3339.
+    decoded_cursor: tuple[str, str, int] | None = None
+    if cursor is not None:
+        decoded_cursor = _decode_cursor(cursor)
 
     # Fetch one extra record to determine whether a next page exists.
     records = store.get_agent_records(
         agent_id,
         since=since,
         until=until,
-        cursor=cursor,
+        cursor=decoded_cursor,
         limit=CONDUCT_PAGE_SIZE + 1,
     )
     next_cursor: str | None = None
     if len(records) > CONDUCT_PAGE_SIZE:
         records = records[:CONDUCT_PAGE_SIZE]
-        next_cursor = records[-1].get("timestamp")
+        last = records[-1]
+        next_cursor = _encode_cursor(
+            last.get("timestamp", ""),
+            last.get("session_id", ""),
+            last.get("position", 0),
+        )
 
     return ConductResponse(
         agent_id=agent_id,

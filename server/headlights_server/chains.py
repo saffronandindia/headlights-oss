@@ -101,40 +101,40 @@ def append_action(
 ) -> tuple[int, str, str]:
     """Append an action record atomically. Returns (position, record_id, record_hash_hex).
 
-    Uses append_record_atomic so that get-last-position and insert happen in a
-    single locked transaction, preventing the chain-forking race condition where
-    two concurrent appends read the same last position and collide on the
-    (session_id, position) PRIMARY KEY.
+    Uses append_record_with_chain_link so that the read of the last record,
+    the computation of prev_hash, and the INSERT all happen inside a single
+    lock acquisition. This prevents the chain-forking race where two concurrent
+    callers read the same last record, compute the same prev_hash, and each
+    produce a record pointing to the same parent — yielding two valid positions
+    but a broken hash chain.
     """
-    last = store.get_last_record(session_id)
-    if last is None:
-        raise LookupError(f"session {session_id} has no genesis record")
-    _prev_position, prev_dict = last
+    def _build(prev_position: int, prev_dict: dict) -> tuple[str, str, str, str]:
+        prev_complete_hash = record_hash_for_chain(prev_dict)
+        record = Record.new(
+            agent_id=agent_id,
+            agent_version=agent_version,
+            session_id=session_id,
+            action_type=action_type,
+            action_detail=action_detail,
+            outcome=outcome,
+            trust_level=trust_level,
+            parent_record_id=prev_dict["record_id"],
+            prev_hash=prev_complete_hash,
+            **(optional_fields or {}),
+        )
+        canonical_dict = record.to_canonical_dict()
+        return (
+            record.record_id,
+            record.timestamp,
+            _canonical_to_json(canonical_dict),
+            record_hash_for_chain(canonical_dict),
+        )
 
-    prev_complete_hash = record_hash_for_chain(prev_dict)
-    record = Record.new(
-        agent_id=agent_id,
-        agent_version=agent_version,
+    new_position, record_id, record_hash = store.append_record_with_chain_link(
         session_id=session_id,
-        action_type=action_type,
-        action_detail=action_detail,
-        outcome=outcome,
-        trust_level=trust_level,
-        parent_record_id=prev_dict["record_id"],
-        prev_hash=prev_complete_hash,
-        **(optional_fields or {}),
+        build_record_fn=_build,
     )
-    canonical_dict = record.to_canonical_dict()
-
-    # append_record_atomic computes MAX(position)+1 and inserts in one locked
-    # transaction — no two concurrent callers can read the same last position.
-    new_position = store.append_record_atomic(
-        session_id=session_id,
-        record_id=record.record_id,
-        timestamp=record.timestamp,
-        canonical_json=_canonical_to_json(canonical_dict),
-    )
-    return (new_position, record.record_id, record_hash_for_chain(canonical_dict))
+    return (new_position, record_id, record_hash)
 
 
 def close_session(

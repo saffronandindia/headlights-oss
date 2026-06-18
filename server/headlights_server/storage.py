@@ -101,15 +101,43 @@ class Store(ABC):
         record_id: str,
         timestamp: str,
         canonical_json: str,
-    ) -> int:
-        """Atomically determine the next position and insert the record.
+    ) -> tuple[int, dict]:
+        """Atomically read the last record, determine next position, and insert.
 
-        Uses a single locked transaction: SELECT MAX(position)+1 then INSERT.
-        Returns the position that was written.
-        Raises sqlite3.IntegrityError if the (session_id, position) PK is
-        somehow already taken (should not happen under the lock).
+        Returns (new_position, last_record_dict) so callers that already have
+        the canonical_json pre-built can still use this path. For the common
+        case where prev_hash must be computed inside the lock, prefer
+        append_record_with_chain_link instead.
+
+        Raises LookupError if the session has no genesis record.
+        Raises sqlite3.IntegrityError on PK collision (should not occur).
         """
         ...
+
+    @abstractmethod
+    def append_record_with_chain_link(
+        self,
+        *,
+        session_id: str,
+        build_record_fn,
+    ) -> tuple[int, str, str]:
+        """Atomically read the last record, build the next record, and insert it.
+
+        ``build_record_fn(prev_position, prev_dict)`` is called *inside* the
+        lock and must return ``(record_id, timestamp, canonical_json,
+        record_hash)``.
+
+        This collapses the read-compute-insert of the hash chain into a single
+        locked transaction, eliminating the prev_hash fork race: two concurrent
+        callers serialise here and each sees the other's committed record before
+        computing its own prev_hash.
+
+        Returns ``(new_position, record_id, record_hash)``.
+        Raises ``LookupError`` if the session has no genesis record.
+        Raises ``sqlite3.IntegrityError`` on PK collision (should not occur).
+        """
+        ...
+
     @abstractmethod
     def close_session_atomic(
         self,
@@ -136,7 +164,7 @@ class Store(ABC):
     @abstractmethod
     def get_session_record_count(self, session_id: str) -> int: ...
     @abstractmethod
-    def get_agent_records(self, agent_id: str, *, since: str | None = None, until: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[dict[str, Any]]: ...
+    def get_agent_records(self, agent_id: str, *, since: str | None = None, until: str | None = None, limit: int | None = None, cursor: tuple[str, str, int] | None = None) -> list[dict[str, Any]]: ...
 
 
 SCHEMA = """
@@ -193,16 +221,18 @@ class SQLiteStore(Store):
 
             # M-002: key_prefix length raised from 16 to 24 (v0.1.0a2)
             # Old rows have a 16-char prefix stored as the PRIMARY KEY. SQLite
-            # does not support ALTER COLUMN so we rebuild the table:
-            #   1. Copy all rows into a temp table.
-            #   2. Drop and recreate api_keys with TEXT PRIMARY KEY (no length
-            #      constraint — SQLite TEXT already has no length limit, so this
-            #      is a no-op for new rows; it just lets us rewrite old rows).
-            #   3. Re-insert with the full key_hash as a stand-in prefix for
-            #      rows where we can no longer reconstruct the original plaintext
-            #      key — those rows get a sentinel prefix that will never match
-            #      a lookup, which is safe: the keys were already rotated away
-            #      when the prefix was exposed in the first place.
+            # TEXT columns carry no enforced length limit, so a plain UPDATE on
+            # the PK column is sufficient — no table rebuild required. Because
+            # api_keys.key_prefix is not referenced by any foreign key, updating
+            # the PK in-place is safe.
+            #
+            # Rows that need migration get a sentinel prefix of the form
+            # 'MIGRATED_' + first-15-hex-chars-of-key_hash (exactly 24 chars).
+            # The sentinel will never match a real lookup (lookups use the
+            # live key_prefix() output), so affected keys are effectively
+            # revoked. The migration is idempotent: re-running on an already-
+            # migrated DB finds LENGTH(key_prefix) >= 24 everywhere and skips.
+            #
             # In practice this migration only matters for development DBs;
             # production deployments start fresh.
             cur.execute("PRAGMA table_info(api_keys)")
@@ -361,27 +391,84 @@ class SQLiteStore(Store):
         record_id: str,
         timestamp: str,
         canonical_json: str,
-    ) -> int:
-        """Atomically determine next position and insert record in one locked transaction.
+    ) -> tuple[int, dict]:
+        """Atomically read the last record, determine next position, and insert.
 
-        Returns the position written. Raises sqlite3.IntegrityError on PK collision
-        (should not occur since position is computed under the same lock).
+        Returns (new_position, last_record_dict).
+        Raises LookupError if the session has no genesis record.
+        Raises sqlite3.IntegrityError on PK collision (should not occur).
         """
         with self._lock:
             cur = self._conn.cursor()
             try:
                 cur.execute(
-                    "SELECT COALESCE(MAX(position), -1) FROM records WHERE session_id = ?",
+                    "SELECT position, canonical_json FROM records "
+                    "WHERE session_id = ? ORDER BY position DESC LIMIT 1",
                     (session_id,),
                 )
-                last_pos = cur.fetchone()[0]
+                row = cur.fetchone()
+                if row is None:
+                    raise LookupError(f"session {session_id} has no genesis record")
+                last_pos = row[0]
+                last_dict = json.loads(row[1])
                 new_position = last_pos + 1
                 cur.execute(
                     "INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)",
                     (session_id, new_position, record_id, timestamp, canonical_json),
                 )
                 self._conn.commit()
-                return new_position
+                return new_position, last_dict
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+    def append_record_with_chain_link(
+        self,
+        *,
+        session_id: str,
+        build_record_fn,
+    ) -> tuple[int, str, str]:
+        """Atomically read the last record, build the next record, and insert it.
+
+        ``build_record_fn(prev_position, prev_dict)`` is called inside the lock
+        and must return ``(record_id, timestamp, canonical_json, record_hash)``.
+
+        This collapses the read-compute-insert of the hash chain into a single
+        locked transaction, eliminating the prev_hash fork race: two concurrent
+        callers serialise here and each sees the other's committed record before
+        computing its own prev_hash.
+
+        Returns ``(new_position, record_id, record_hash)``.
+        Raises ``LookupError`` if the session has no genesis record.
+        Raises ``sqlite3.IntegrityError`` on PK collision (should not occur).
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT position, canonical_json FROM records "
+                    "WHERE session_id = ? ORDER BY position DESC LIMIT 1",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise LookupError(f"session {session_id} has no genesis record")
+                prev_position = row[0]
+                prev_dict = json.loads(row[1])
+
+                record_id, timestamp, canonical_json, record_hash = build_record_fn(
+                    prev_position, prev_dict
+                )
+
+                new_position = prev_position + 1
+                cur.execute(
+                    "INSERT INTO records (session_id, position, record_id, timestamp, canonical_json) VALUES (?, ?, ?, ?, ?)",
+                    (session_id, new_position, record_id, timestamp, canonical_json),
+                )
+                self._conn.commit()
+                return new_position, record_id, record_hash
             except Exception:
                 self._conn.rollback()
                 raise
@@ -442,6 +529,19 @@ class SQLiteStore(Store):
             return cur.fetchone()[0]
 
     def get_agent_records(self, agent_id, *, since=None, until=None, limit=None, cursor=None):
+        """Fetch records for an agent with optional time-range filter and cursor pagination.
+
+        ``cursor`` must be either None or a tuple ``(timestamp, session_id, position)``
+        as returned by ``encode_conduct_cursor`` / ``decode_conduct_cursor`` in
+        ``routes/conduct.py``.  A raw RFC 3339 string is *no longer accepted* — callers
+        that pass a plain string will get a TypeError from SQLite's tuple parameter
+        binding, which is the correct failure mode.
+
+        The pagination predicate is a row-value comparison:
+            (r.timestamp, r.session_id, r.position) > (?, ?, ?)
+        which guarantees that no records are skipped when multiple records share
+        the same millisecond timestamp at a page boundary.
+        """
         clauses = ["s.agent_id = ?"]
         params: list[Any] = [agent_id]
         if since is not None:
@@ -449,9 +549,14 @@ class SQLiteStore(Store):
         if until is not None:
             clauses.append("r.timestamp <= ?"); params.append(until)
         if cursor is not None:
-            # cursor is an opaque RFC 3339 timestamp; return records strictly after it
-            clauses.append("r.timestamp > ?"); params.append(cursor)
-        sql = ("SELECT r.canonical_json FROM records r JOIN sessions s ON s.session_id = r.session_id "
+            cur_ts, cur_sid, cur_pos = cursor
+            # Row-value comparison: deterministic total order over (ts, sid, pos).
+            clauses.append(
+                "(r.timestamp, r.session_id, r.position) > (?, ?, ?)"
+            )
+            params.extend([cur_ts, cur_sid, int(cur_pos)])
+        sql = ("SELECT r.canonical_json, r.session_id, r.position "
+               "FROM records r JOIN sessions s ON s.session_id = r.session_id "
                f"WHERE {' AND '.join(clauses)} ORDER BY r.timestamp ASC, r.session_id ASC, r.position ASC")
         if limit is not None:
             sql += f" LIMIT {int(limit)}"

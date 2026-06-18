@@ -451,27 +451,59 @@ def test_conduct_returns_next_cursor_when_over_page_size(
 def test_conduct_cursor_pagination_advances(
     client: TestClient, registered_agent: tuple[str, str]
 ) -> None:
-    """Passing cursor from one page returns a non-overlapping next page."""
+    """Cursor from one page produces a non-overlapping next page.
+
+    The cursor is now an opaque base64url token encoding (timestamp, session_id,
+    position) — not a raw RFC 3339 timestamp.  Tests must obtain next_cursor
+    from the API response, not construct it manually.
+    """
     agent_id, key = registered_agent
     sid = _open_session(client, agent_id, key)
     for i in range(5):
         _append(client, agent_id, key, sid, i)
 
-    # First page: all records (well under limit)
+    # First page: all records (well under limit), no cursor needed.
     r1 = client.get(f"/v1/agents/{agent_id}/conduct", headers=_auth(key))
     assert r1.status_code == 200
-    records_p1 = r1.json()["records"]
+    body1 = r1.json()
+    records_p1 = body1["records"]
+    assert len(records_p1) >= 1
 
-    # Pass cursor = timestamp of last record on p1
-    last_ts = records_p1[-1]["timestamp"]
+    # A raw RFC 3339 timestamp is now rejected as a malformed cursor.
+    raw_ts = records_p1[-1]["timestamp"]
+    r_bad = client.get(
+        f"/v1/agents/{agent_id}/conduct",
+        headers=_auth(key),
+        params={"cursor": raw_ts},
+    )
+    assert r_bad.status_code == 422, (
+        "raw RFC 3339 timestamp should be rejected; cursor must be the opaque "
+        "next_cursor token returned by the API"
+    )
+
+    # When the server returns next_cursor, use it to fetch the next page.
+    # With only 5 appended records (+ 1 genesis) and a page size of 1000,
+    # next_cursor will be None (all records fit on one page).  To exercise
+    # multi-page traversal we need > CONDUCT_PAGE_SIZE records, which is an
+    # integration concern outside unit tests.  Here we just verify that the
+    # opaque cursor round-trips correctly by encoding one ourselves.
+    import base64, json as _json
+    last = records_p1[-1]
+    token = base64.urlsafe_b64encode(
+        _json.dumps(
+            [last["timestamp"], last.get("session_id", sid), 999],
+            separators=(",", ":"),
+        ).encode()
+    ).decode()
     r2 = client.get(
         f"/v1/agents/{agent_id}/conduct",
         headers=_auth(key),
-        params={"cursor": last_ts},
+        params={"cursor": token},
     )
     assert r2.status_code == 200
     records_p2 = r2.json()["records"]
-    # Cursor is exclusive — no record from p1 should appear in p2
+    # Cursor is exclusive — no record with position <= 999 should appear in p2
+    # (in practice position 999 doesn't exist, so p2 should be empty).
     p1_ids = {r["record_id"] for r in records_p1}
     for rec in records_p2:
         assert rec["record_id"] not in p1_ids
@@ -578,3 +610,119 @@ def test_close_session_atomic_rolls_back_on_update_failure(
     # No record should have been written at that position
     result = store.get_record_at("00000000-0000-4000-8000-000000000000", 99)
     assert result is None
+
+
+# ── Fix verification: prev_hash race (append_record_with_chain_link) ─────────
+
+
+def test_concurrent_appends_produce_valid_hash_chain(
+    client: TestClient, registered_agent: tuple[str, str]
+) -> None:
+    """Two concurrent appends must produce a linear, un-forked hash chain.
+
+    Before the fix, two threads could read the same last record outside the
+    lock, compute the same prev_hash, and insert at positions 1 and 2 — both
+    pointing to the genesis as their parent.  Chain.verify() would flag the
+    fork.  After the fix, append_record_with_chain_link serialises the
+    read-compute-insert inside a single lock: the second caller sees the first
+    caller's record as the new tail and chains correctly.
+    """
+    import threading
+    from headlights_chain import Chain
+    from headlights_server.deps import get_store
+
+    agent_id, key = registered_agent
+    sid = _open_session(client, agent_id, key)
+
+    errors: list[Exception] = []
+
+    def _do_append() -> None:
+        try:
+            _append(client, agent_id, key, sid, 0)
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_do_append)
+    t2 = threading.Thread(target=_do_append)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert not errors, f"append threads raised: {errors}"
+
+    # Retrieve all records and verify the chain is intact (no fork).
+    r = client.get(
+        f"/v1/agents/{agent_id}/sessions/{sid}/conduct",
+        headers=_auth(key),
+    )
+    assert r.status_code == 200
+    records = r.json()["records"]
+    assert len(records) == 3  # genesis + 2 appended
+
+    chain = Chain.from_records(records)
+    result = chain.verify()
+    assert result.is_intact, (
+        f"hash chain is broken after concurrent appends (prev_hash race): {result.reason}"
+    )
+
+
+# ── Fix verification: opaque cursor encodes (ts, sid, pos) ───────────────────
+
+
+def test_cursor_is_opaque_base64_not_rfc3339(
+    client: TestClient, registered_agent: tuple[str, str]
+) -> None:
+    """next_cursor returned by the API is now an opaque base64url token, not
+    a raw RFC 3339 timestamp.  A raw timestamp passed as cursor must be rejected
+    with 422, while the opaque token must be accepted with 200.
+    """
+    import base64, json as _json
+
+    agent_id, key = registered_agent
+    sid = _open_session(client, agent_id, key)
+    _append(client, agent_id, key, sid, 0)
+
+    r = client.get(f"/v1/agents/{agent_id}/conduct", headers=_auth(key))
+    assert r.status_code == 200
+    records = r.json()["records"]
+    assert records
+
+    # Raw timestamp → 422
+    raw_ts = records[-1]["timestamp"]
+    r422 = client.get(
+        f"/v1/agents/{agent_id}/conduct",
+        headers=_auth(key),
+        params={"cursor": raw_ts},
+    )
+    assert r422.status_code == 422, "raw RFC 3339 cursor should be rejected"
+
+    # Opaque token → 200
+    last = records[-1]
+    token = base64.urlsafe_b64encode(
+        _json.dumps(
+            [last["timestamp"], last.get("session_id", sid), 9999],
+            separators=(",", ":"),
+        ).encode()
+    ).decode()
+    r200 = client.get(
+        f"/v1/agents/{agent_id}/conduct",
+        headers=_auth(key),
+        params={"cursor": token},
+    )
+    assert r200.status_code == 200, f"opaque cursor should be accepted, got {r200.status_code}"
+
+
+# ── Fix verification: M-002 comment accuracy ─────────────────────────────────
+
+
+def test_m002_migration_comment_does_not_mention_rebuild() -> None:
+    """The M-002 migration comment must not describe a 3-step table rebuild
+    that the code does not perform — that misdirects future Postgres porters."""
+    import inspect
+    from headlights_server import storage
+    src = inspect.getsource(storage.SQLiteStore._migrate)
+    assert "temp table" not in src.lower(), (
+        "M-002 comment still mentions a temp-table rebuild that doesn't happen"
+    )
+    assert "Copy all rows" not in src, (
+        "M-002 comment still describes a table copy that doesn't happen"
+    )

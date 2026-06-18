@@ -152,7 +152,9 @@ class ConductResponse(BaseModel):
         default=None,
         description=(
             "Opaque cursor for the next page. Pass as `cursor=` to retrieve the next batch. "
-            "Null when no further records exist."
+            "Null when no further records exist. "
+            "The cursor encodes (timestamp, session_id, position) so that records with "
+            "identical timestamps at a page boundary are never skipped."
         ),
     )
 
