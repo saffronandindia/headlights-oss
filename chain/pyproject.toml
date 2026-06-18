@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "cryptography>=42.0,<47",
+    "cryptography>=42.0,<50",
     "pydantic>=2.5,<3",
     "rfc8785>=0.1.4,<0.2",
 ]
