@@ -1,0 +1,29 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: headlights-server:latest
+    container_name: headlights-server
+    ports:
+      - "8000:8000"
+    volumes:
+      # SQLite database persists across restarts
+      - headlights_data:/data
+    environment:
+      HEADLIGHTS_DATABASE_URL: "sqlite:////data/headlights.db"
+      HEADLIGHTS_DEBUG: "false"
+      # Uncomment to enable /docs locally:
+      # HEADLIGHTS_DEBUG: "true"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  headlights_data:
+    driver: local

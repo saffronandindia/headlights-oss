@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from headlights_server.auth import (
     generate_api_key,
@@ -16,13 +16,15 @@ from headlights_server.deps import get_settings, get_store
 from headlights_server.models import RegisterAgentRequest, RegisterAgentResponse
 from headlights_server.storage import AgentRow, ApiKeyRow, Store
 
-# TODO: add per-IP rate limiting (e.g. slowapi) before public deployment.
-# POST /v1/agents is unauthenticated; without a rate limit an attacker can
-# exhaust disk and enumerate key-prefix space by registering agents in bulk.
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
+
+# Per-IP rate limit applied to the unauthenticated registration endpoint.
+# 10 registrations per hour is generous for legitimate use while making
+# bulk-registration attacks expensive. The limiter instance lives on
+# app.state.limiter so each app (including test apps) has its own state.
+_REGISTER_RATE = "10/hour"
 
 
 @router.post(
@@ -32,10 +34,17 @@ router = APIRouter(prefix="/v1/agents", tags=["agents"])
     summary="Register a new agent and receive an API key (shown once).",
 )
 def register_agent(
+    request: Request,
     body: RegisterAgentRequest,
     store: Annotated[Store, Depends(get_store)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> RegisterAgentResponse:
+    # Rate-limit check: raises 429 if the caller has exceeded _REGISTER_RATE.
+    # Reads limiter from app.state so test apps can pass enabled=False.
+    limiter = getattr(request.app.state, "limiter", None)
+    if limiter is not None:
+        limiter.check(request, _REGISTER_RATE, "register_agent")
+
     agent_id = make_agent_id(settings.agent_id_prefix, body.agent_name)
     created_at = utc_now()
 

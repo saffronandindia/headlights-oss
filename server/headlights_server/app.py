@@ -23,6 +23,14 @@ Interactive docs
 the default). Set HEADLIGHTS_DEBUG=true to enable them locally. Leaking the
 full schema in production is a recon gift; the OpenAPI spec is available in the
 source repo for integrators.
+
+Rate limiting
+-------------
+POST /v1/agents (agent registration) is unauthenticated and is protected by
+an in-process per-IP fixed-window rate limiter (IPRateLimiter). The limiter
+lives on app.state.limiter so each app instance, including test apps, gets
+independent state. Pass enabled=False to IPRateLimiter() to disable limits
+in tests.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from fastapi.responses import JSONResponse
 
 from headlights_server import __version__
 from headlights_server.config import Settings
+from headlights_server.ratelimit import IPRateLimiter
 from headlights_server.routes.agents import router as agents_router
 from headlights_server.routes.conduct import router as conduct_router
 from headlights_server.routes.trace import router as trace_router
@@ -52,14 +61,22 @@ def create_app(
     store: Store | None = None,
     settings: Settings | None = None,
     debug: bool | None = None,
+    rate_limit_enabled: bool = True,
 ) -> FastAPI:
     """Build a FastAPI app instance.
 
-    Pass a custom Store for tests; otherwise an SQLiteStore is constructed
-    from the configured database_url.
-
-    Pass debug=True to enable /docs and /openapi.json (default: off in
-    production, controlled by HEADLIGHTS_DEBUG env var).
+    Parameters
+    ----------
+    store : Store | None
+        Pass a custom Store for tests; otherwise an SQLiteStore is built from
+        settings.database_url.
+    settings : Settings | None
+        Pass custom settings; otherwise built from env vars.
+    debug : bool | None
+        Enable /docs and /openapi.json. Defaults to HEADLIGHTS_DEBUG env var
+        (false in production).
+    rate_limit_enabled : bool
+        Set False to disable per-IP rate limiting (tests only).
     """
     settings = settings or Settings.from_env()
     if store is None:
@@ -89,6 +106,7 @@ def create_app(
     )
     app.state.store = store
     app.state.settings = settings
+    app.state.limiter = IPRateLimiter(enabled=rate_limit_enabled)
 
     app.include_router(agents_router)
     app.include_router(conduct_router)

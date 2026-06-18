@@ -30,7 +30,9 @@ def settings() -> Settings:
 
 @pytest.fixture
 def client(store: SQLiteStore, settings: Settings) -> TestClient:
-    app = create_app(store=store, settings=settings)
+    # rate_limit_enabled=False gives each test app its own disabled limiter
+    # so registration calls don't hit the 10/hour ceiling during the test run.
+    app = create_app(store=store, settings=settings, rate_limit_enabled=False)
     return TestClient(app)
 
 

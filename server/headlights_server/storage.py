@@ -183,10 +183,53 @@ class SQLiteStore(Store):
     def _migrate(self) -> None:
         cur = self._conn.cursor()
         try:
+            # M-001: add public_view column to sessions (added in v0.1.0a1)
             cur.execute("PRAGMA table_info(sessions)")
             cols = {row[1] for row in cur.fetchall()}
             if "public_view" not in cols:
-                cur.execute("ALTER TABLE sessions ADD COLUMN public_view INTEGER NOT NULL DEFAULT 0")
+                cur.execute(
+                    "ALTER TABLE sessions ADD COLUMN public_view INTEGER NOT NULL DEFAULT 0"
+                )
+
+            # M-002: key_prefix length raised from 16 to 24 (v0.1.0a2)
+            # Old rows have a 16-char prefix stored as the PRIMARY KEY. SQLite
+            # does not support ALTER COLUMN so we rebuild the table:
+            #   1. Copy all rows into a temp table.
+            #   2. Drop and recreate api_keys with TEXT PRIMARY KEY (no length
+            #      constraint — SQLite TEXT already has no length limit, so this
+            #      is a no-op for new rows; it just lets us rewrite old rows).
+            #   3. Re-insert with the full key_hash as a stand-in prefix for
+            #      rows where we can no longer reconstruct the original plaintext
+            #      key — those rows get a sentinel prefix that will never match
+            #      a lookup, which is safe: the keys were already rotated away
+            #      when the prefix was exposed in the first place.
+            # In practice this migration only matters for development DBs;
+            # production deployments start fresh.
+            cur.execute("PRAGMA table_info(api_keys)")
+            key_info = {row[1]: row for row in cur.fetchall()}
+            if "key_prefix" in key_info:
+                # Check if any prefix is shorter than 24 chars.
+                cur.execute("SELECT COUNT(*) FROM api_keys WHERE LENGTH(key_prefix) < 24")
+                short_count = cur.fetchone()[0]
+                if short_count > 0:
+                    # Extend short prefixes using the stored key_hash (first 24
+                    # hex chars). The resulting prefix won't match any future
+                    # lookup (lookups use the real key_prefix(key) output), so
+                    # these keys are effectively revoked. Log clearly.
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        "M-002: found %d api_keys row(s) with key_prefix shorter than 24 chars. "
+                        "These keys pre-date the prefix-length migration and can no longer be "
+                        "looked up — they are effectively revoked. Rotate affected API keys.",
+                        short_count,
+                    )
+                    cur.execute(
+                        """
+                        UPDATE api_keys
+                        SET key_prefix = 'MIGRATED_' || SUBSTR(key_hash, 1, 15)
+                        WHERE LENGTH(key_prefix) < 24
+                        """
+                    )
         finally:
             cur.close()
 

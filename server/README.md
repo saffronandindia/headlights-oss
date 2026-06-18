@@ -1,53 +1,153 @@
 # headlights-server
 
-If you're going to record what your AI agent does, you need somewhere to put the records. This is the reference backend — a FastAPI service over SQLite, with the endpoints needed to register an agent, open a session, append actions, and retrieve the chain for verification. Run it locally for development. Swap SQLite for Postgres for production. Or skip it entirely and write your own; the `Store` interface in `storage.py` is the only contract.
+FastAPI backend for [Headlights](https://useheadlights.com) — the open-source AI conduct record server.
 
-## Endpoints
+Every AI agent action is appended to a tamper-evident SHA-256 hash chain, optionally signed with ECDSA P-256, and published as a public audit page that anyone can verify offline with [`headlights-verify`](../verify/).
 
-- `POST /v1/agents` — register an agent, receive an API key (shown once).
-- `POST /v1/agents/{agent_id}/sessions` — open a session, get the genesis record back.
-- `POST /v1/agents/{agent_id}/actions` — append an action to a session (auto-opens one if none active).
-- `POST /v1/agents/{agent_id}/sessions/{session_id}/close` — close a session, get the `session_hash`.
-- `GET  /v1/agents/{agent_id}/conduct` — list all records for an agent (supports `?since=&until=` filtering).
-- `GET  /v1/agents/{agent_id}/sessions/{session_id}/conduct` — list records in one session.
+Implements [IETF draft-sharif-agent-audit-trail-00](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/).
 
-All `/v1/agents/{agent_id}/*` routes require `Authorization: Bearer hl_live_…` where the API key belongs to that agent.
+---
 
-Records live in SQLite at v1. The `Store` interface in `storage.py` is the swap-out point for Postgres (or anything else) without touching routes or models.
-
-## Install
+## Quick start (Docker)
 
 ```bash
-pip install -e ./chain ./server
-headlights-server --host 127.0.0.1 --port 8080
+docker compose up
 ```
 
-OpenAPI docs at `http://localhost:8080/docs` once running.
-
-## Quickest possible smoke test
+The server starts on `http://localhost:8000`. Register your first agent:
 
 ```bash
-# Register
-curl -X POST http://localhost:8080/v1/agents \
-  -H 'content-type: application/json' \
-  -d '{"agent_name":"loan-analyser","owner_email":"e@example.com","purpose":"demo","agent_version":"1.0.0"}'
-# → { "agent_id":"urn:headlights:agent:loan-analyser-abc123def0", "api_key":"hl_live_…", "created_at":"…" }
-
-AGENT=urn:headlights:agent:loan-analyser-abc123def0
-KEY=hl_live_…
-
-# Append an action (auto-opens a session)
-curl -X POST http://localhost:8080/v1/agents/$AGENT/actions \
-  -H "Authorization: Bearer $KEY" \
-  -H 'content-type: application/json' \
-  -d '{"action_type":"tool_call","action_detail":{"tool_name":"credit_lookup","parameters_hash":"sha256:abc"},"outcome":"success","trust_level":"L1"}'
-
-# Retrieve the chain
-curl -H "Authorization: Bearer $KEY" http://localhost:8080/v1/agents/$AGENT/conduct
+curl -s -X POST http://localhost:8000/v1/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "my-agent",
+    "owner_email": "you@example.com",
+    "purpose": "Customer support automation"
+  }' | jq .
 ```
 
-Pipe the conduct response into `headlights-verify` to confirm tamper-evidence end-to-end.
+Save the `api_key` — it is shown **once**.
 
-## License
+---
 
-Apache 2.0.
+## Quick start (local Python)
+
+Requires Python 3.10+.
+
+```bash
+pip install -e ".[dev]"
+HEADLIGHTS_DEBUG=true uvicorn headlights_server.app:app --reload
+```
+
+Interactive docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEADLIGHTS_DATABASE_URL` | `sqlite:///./headlights.db` | SQLite database path. Prefix with `sqlite:///`. |
+| `HEADLIGHTS_DEBUG` | `false` | Set `true` to enable `/docs`, `/redoc`, `/openapi.json`. |
+| `HEADLIGHTS_AGENT_ID_PREFIX` | `urn:headlights:agent:` | URI prefix for generated agent IDs. |
+| `HEADLIGHTS_API_KEY_PREFIX` | `hl_live_` | Plaintext prefix on issued API keys. |
+| `HEADLIGHTS_SESSION_CAP` | `100000` | Maximum records per session (free-tier guard). |
+
+---
+
+## API overview
+
+All authenticated endpoints require `Authorization: Bearer <api-key>`.
+
+### Agent registration (unauthenticated)
+
+```
+POST /v1/agents
+```
+
+Rate-limited to **10 registrations per hour per IP**. Returns an `api_key` shown once.
+
+### Session lifecycle
+
+```
+POST /v1/agents/{agent_id}/sessions          → open a session (genesis record)
+POST /v1/agents/{agent_id}/sessions/{id}/close   → close + write session_end record
+```
+
+### Appending actions
+
+```
+POST /v1/agents/{agent_id}/actions
+```
+
+Appends an AAT action record to the agent's current open session. Opens a new session automatically if none is active.
+
+### Viewing conduct
+
+```
+GET /v1/agents/{agent_id}/conduct            → paginated record list (max 1000/page)
+GET /v1/agents/{agent_id}/sessions/{id}/conduct  → all records for one session
+```
+
+Query parameters: `since` (RFC 3339), `until` (RFC 3339), `cursor` (opaque, from `next_cursor`).
+
+### Public trace (unauthenticated)
+
+```
+POST /v1/agents/{agent_id}/sessions/{id}/publish   → make session public
+GET  /v1/sessions/{id}/trace                        → HTML audit page
+GET  /v1/sessions/{id}/trace.json                   → canonical JSON export
+```
+
+Sessions are **private by default**. Publishing is an explicit opt-in. The HTML page shows a badge:
+
+| Badge | Meaning |
+|---|---|
+| 🟢 `CHAIN INTACT · SIGNED` | Hash chain intact, session closed, ECDSA signatures verified |
+| 🟡 `CHAIN INTACT · HASH ONLY` | Hash chain intact, session closed, no public key on file |
+| 🟡 `OPEN SESSION · NOT FINALISED` | Session not yet closed — records may still be appended |
+| 🔴 `CHAIN BROKEN` | Hash chain integrity failure at a specific position |
+
+The "Download canonical JSON" button on the trace page lets anyone verify the chain offline:
+
+```bash
+pip install headlights-verify
+headlights-verify trace.json
+```
+
+---
+
+## Database migrations
+
+`SQLiteStore` runs all migrations automatically on startup via `_migrate()`. Current migrations:
+
+| ID | Description |
+|---|---|
+| M-001 | Add `public_view` column to `sessions` |
+| M-002 | Extend `api_keys.key_prefix` rows shorter than 24 chars (from pre-v0.1.0a2 DBs). **Affected keys are revoked** — rotate them after first startup. |
+
+---
+
+## Security notes
+
+- **No CORS middleware.** This is intentional — the API uses bearer tokens, and same-origin policy is the correct default for authenticated APIs. Add an explicit origin allowlist if you need browser access.
+- **`/docs` disabled in production.** Set `HEADLIGHTS_DEBUG=true` locally.
+- **API keys are hashed.** Only the SHA-256 hash of each key is stored. The plaintext is shown once at registration.
+- **Sensitive fields are hashed before storage.** `input_hash`, `output_hash` in action records accept `sha256:...` values — never raw content.
+- **Public key optional.** Agents without a stored ECDSA P-256 public key get hash-chain-only integrity, surfaced as the amber `HASH ONLY` badge on the public trace page.
+
+---
+
+## Running tests
+
+```bash
+cd server
+pip install -e ".[dev]"
+pytest
+```
+
+---
+
+## Licence
+
+Apache 2.0 — see [LICENSE](../LICENSE).
