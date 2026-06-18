@@ -16,6 +16,8 @@ docker compose up
 
 The server starts on `http://localhost:8000`. Register your first agent:
 
+> **Single-worker constraint:** The rate limiter is in-process. The default `--workers 1` in the Docker image must be kept. Scaling to multiple workers multiplies the effective rate limit by the worker count. Replace the in-memory limiter with a Redis-backed counter before deploying multi-worker. See [#3](https://github.com/saffronandindia/headlights-oss/issues/3).
+
 ```bash
 curl -s -X POST http://localhost:8000/v1/agents \
   -H "Content-Type: application/json" \
@@ -130,6 +132,7 @@ headlights-verify trace.json
 
 ## Security notes
 
+- **Reverse proxy / X-Forwarded-For:** The rate limiter uses `request.client.host` when no `X-Forwarded-For` header is present. If you deploy behind nginx, Caddy, or a cloud load balancer you **must** configure trusted proxy IPs (see [#1](https://github.com/saffronandindia/headlights-oss/issues/1)) otherwise rate-limit bypass is trivially possible.
 - **No CORS middleware.** This is intentional — the API uses bearer tokens, and same-origin policy is the correct default for authenticated APIs. Add an explicit origin allowlist if you need browser access.
 - **`/docs` disabled in production.** Set `HEADLIGHTS_DEBUG=true` locally.
 - **API keys are hashed.** Only the SHA-256 hash of each key is stored. The plaintext is shown once at registration.
