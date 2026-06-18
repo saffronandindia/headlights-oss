@@ -1,5 +1,11 @@
 """Public trace viewer + session publishing.
 
+Degraded-mode rendering: if the agent row has been deleted after a session
+was published, the trace still renders but shows a banner explaining that
+the signing key is no longer on file and signature verification is
+unavailable. The session's hash-chain integrity is still checked.
+
+
 The trace viewer is the artifact that goes in every outbound email: a public
 HTML page rendering exactly what an agent did in one session, with a button
 to download the canonical export for offline verification via
@@ -23,6 +29,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -37,6 +44,8 @@ from headlights_server.models import (
     PublishSessionResponse,
 )
 from headlights_server.storage import Store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["trace"])
 
@@ -86,15 +95,24 @@ def trace_html_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="trace not found")
 
     agent = store.get_agent(session.agent_id)
+    if agent is None:
+        # Agent row deleted after session was published. Render in degraded
+        # mode: hash-chain is still verified, but no signing key available.
+        logger.warning(
+            "published session %s references deleted agent %s — rendering degraded trace",
+            session_id,
+            session.agent_id,
+        )
     records = store.get_session_records(session_id)
     verification = _verify(records, agent.public_key_pem if agent else None)
 
     html_body = _render_trace_html(
         agent_id=session.agent_id,
-        agent_name=agent.agent_name if agent else session.agent_id,
+        agent_name=agent.agent_name if agent else None,
         session=session,
         records=records,
         verification=verification,
+        agent_missing=agent is None,
     )
     return HTMLResponse(content=html_body)
 
@@ -186,12 +204,33 @@ _BADGE_META: dict[str, tuple[str, str, str]] = {
 def _render_trace_html(
     *,
     agent_id: str,
-    agent_name: str,
+    agent_name: str | None,
     session,
     records: list[dict[str, Any]],
     verification: dict[str, Any],
+    agent_missing: bool = False,
 ) -> str:
-    """Server-side render the trace as HTML. No JS framework; one self-contained page."""
+    """Server-side render the trace as HTML. No JS framework; one self-contained page.
+
+    When agent_missing=True the agent row has been deleted after publishing.
+    A degraded-mode banner is shown and the agent_id is used as the display name.
+    """
+    display_name = agent_name if agent_name else agent_id
+
+    degraded_banner = ""
+    if agent_missing:
+        degraded_banner = (
+            '<div style="background:#5a1e1e;border:1px solid #f85149;border-radius:6px;'
+            'padding:12px 18px;margin-bottom:20px;font-size:13px;color:#f8d7d7;">'
+            '<strong style="color:#f85149;">\u26a0\ufe0f Degraded mode</strong> — '
+            'the agent record associated with this session has been deleted. '
+            'Hash-chain integrity can still be checked, but signature verification '
+            'is unavailable. Download the canonical JSON and run '
+            '<code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;">'
+            'headlights-verify</code> to confirm chain integrity independently.'
+            '</div>'
+        )
+
     state = _badge_state(verification)
     badge_color, _dot_color, badge_text = _BADGE_META[state]
 
@@ -238,7 +277,7 @@ def _render_trace_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Conduct trace · {html.escape(agent_name)} · Headlights</title>
+<title>Conduct trace · {html.escape(display_name)} · Headlights</title>
 <style>
 :root {{
   --bg: #0e1116; --bg-card: #161b22; --bg-row-alt: #1a1f27;
@@ -309,9 +348,10 @@ footer p {{ margin: 4px 0; }}
 <body>
 <div class="wrap">
 
+{degraded_banner}
 <header>
   <div class="eyebrow">Headlights · Public conduct trace</div>
-  <h1>{html.escape(agent_name)}</h1>
+  <h1>{html.escape(display_name)}</h1>
   <div class="subtitle">Session <span class="mono">{html.escape(session.session_id)}</span></div>
   <div class="status"><span class="dot"></span>{html.escape(badge_text)}</div>
   {f'<span class="status-detail">{html.escape(badge_detail)}</span>' if badge_detail else ''}

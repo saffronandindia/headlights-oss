@@ -21,11 +21,16 @@ def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def key_prefix(key: str, length: int = 16) -> str:
+def key_prefix(key: str, length: int = 24) -> str:
     """First `length` characters of the key, used as a fast-lookup index.
 
-    Even with the prefix exposed, the secret part (the random suffix) still
-    provides ~144 bits of entropy.
+    Default increased from 16 to 24 to reduce the birthday-collision
+    probability on the api_keys.key_prefix PRIMARY KEY from ~2^48 to ~2^64
+    at scale. The prefix is `'hl_live_'` (8 fixed chars) plus the first 16
+    chars of the base64 payload, giving 64 bits of uniqueness space.
+
+    Even with the prefix exposed, the secret part (the remaining ~112 bits
+    of the random suffix) stays hidden in the DB as a SHA-256 hash.
     """
     return key[:length]
 
