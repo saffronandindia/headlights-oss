@@ -22,6 +22,11 @@ class Settings:
     free_tier_session_cap: int = 100_000
     """Max records per session before further appends are rejected. ADR-006 / handover §11."""
 
+    trust_forwarded_for: bool = False
+    """Trust the X-Forwarded-For header to determine the client IP for rate
+    limiting. Enable ONLY behind a trusted reverse proxy that appends the real
+    client IP. Off by default so the header cannot be spoofed to bypass limits."""
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -31,4 +36,7 @@ class Settings:
             free_tier_session_cap=int(
                 os.getenv("HEADLIGHTS_SESSION_CAP", str(cls.free_tier_session_cap))
             ),
+            trust_forwarded_for=os.getenv(
+                "HEADLIGHTS_TRUST_FORWARDED_FOR", "false"
+            ).lower() in {"1", "true", "yes"},
         )

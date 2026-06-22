@@ -106,7 +106,10 @@ def create_app(
     )
     app.state.store = store
     app.state.settings = settings
-    app.state.limiter = IPRateLimiter(enabled=rate_limit_enabled)
+    app.state.limiter = IPRateLimiter(
+        enabled=rate_limit_enabled,
+        trust_forwarded_for=settings.trust_forwarded_for,
+    )
 
     app.include_router(agents_router)
     app.include_router(conduct_router)
